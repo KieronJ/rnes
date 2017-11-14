@@ -1,0 +1,7 @@
+[package]
+name = "rnes"
+version = "0.1.0"
+authors = ["Kieron Josephs <kieron.josephs00@gmail.com>"]
+
+[dependencies]
+sdl2 = "0.31.0"
