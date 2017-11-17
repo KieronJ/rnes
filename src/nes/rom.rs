@@ -1,10 +1,9 @@
 use std::io::Read;
 
-const ROM_CHR_BANK_SIZE:    usize = 8192;
-const ROM_HEADER_SIZE:      usize = 16;
-const ROM_PRG_BANK_SIZE:    usize = 16384;
+pub const ROM_CHR_BANK_SIZE:    usize = 8192;
+pub const ROM_HEADER_SIZE:      usize = 16;
+pub const ROM_PRG_BANK_SIZE:    usize = 16384;
 
-#[derive(Debug)]
 pub struct INesHeader {
     magic: [u8; 4],
     prg: u8,
@@ -15,7 +14,6 @@ pub struct INesHeader {
     flags9: u8,
 }
 
-#[derive(Debug)]
 pub struct Rom {
     header: INesHeader,
     prg: Box<[u8]>,
@@ -23,16 +21,20 @@ pub struct Rom {
 }
 
 impl Rom {
-    pub fn mapper(self) -> u8 {
+    pub fn mapper(&self) -> u8 {
         (self.header.flags6 >> 4) | (self.header.flags7 & 0xf0)
     }
 
-    pub fn read_chr(self, address: usize) -> u8 {
-        self.chr[address]
+    pub fn read_chr(&self, address: u16) -> u8 {
+        self.chr[address as usize]
     }
 
-    pub fn read_prg(self, address: usize) -> u8 {
-        self.prg[address]
+    pub fn read_prg(&self, address: u16) -> u8 {
+        self.prg[address as usize]
+    }
+
+    pub fn prg_banks(&self) -> usize {
+        self.prg.len() / ROM_PRG_BANK_SIZE
     }
 }
 
@@ -58,8 +60,8 @@ pub fn create_rom(file: &mut Read) -> Rom {
     let mut chr = vec![0u8; chr_size].into_boxed_slice();
     bytes_read += file.read(&mut chr[0..]).unwrap();
 
-    if bytes_read != (16 + prg_size + chr_size) {
-        panic!("Unexpected EOF.");
+    if bytes_read != (ROM_HEADER_SIZE + prg_size + chr_size) {
+        panic!("unexpected EOF");
     }
 
     Rom {
