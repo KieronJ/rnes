@@ -3,22 +3,24 @@ extern crate sdl2;
 mod nes;
 mod util;
 
-use nes::bus::create_bus;
+use nes::bus::Bus;
 use nes::mapper::create_mapper;
+use nes::ricoh2c02::Ricoh2C02;
 use nes::ricoh2a03::Ricoh2A03;
-use nes::rom::create_rom;
+use nes::rom::Rom;
 use sdl2::event::*;
 use sdl2::keyboard::*;
 use util::open_file;
 
 fn main() {
-	let mut rom_file = open_file("donkey_kong.nes").unwrap();
-	let rom = create_rom(&mut rom_file);
+	let mut rom_file = open_file("nestest.nes").unwrap();
+	let rom = Rom::new(&mut rom_file);
 
-	let mapper = create_mapper(rom);
+	let mapper = create_mapper(rom.clone());
+	let ppu_mapper = create_mapper(rom);
 
-	let bus = create_bus(mapper);
-
+	let ppu = Ricoh2C02::new(mapper);
+	let bus = Bus::new(ppu_mapper, ppu);
 	let mut cpu = Ricoh2A03::new(bus);
 
 	let sdl_context = sdl2::init().unwrap();
