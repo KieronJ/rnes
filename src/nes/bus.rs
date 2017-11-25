@@ -1,3 +1,5 @@
+extern crate sdl2;
+
 use nes::mapper::Mapper;
 use nes::ricoh2c02::Ricoh2C02;
 
@@ -18,19 +20,47 @@ impl Bus {
         }
     }
 
-    pub fn read(&self, address: u16) -> u8 {
+	pub fn check_nmi(&mut self) -> bool {
+		self.ppu.check_nmi()
+	}
+
+    pub fn clear_nmi(&mut self) {
+        self.ppu.clear_nmi();
+    }
+
+    pub fn copy_framebuffer(&self, texture: &mut sdl2::render::Texture) {
+        self.ppu.copy_framebuffer(texture);
+    }
+
+    pub fn read(&mut self, address: u16) -> u8 {
         let address = address as usize;
 
         if address < 0x2000 {
             return self.ram[address % RAM_SIZE];
         }
 
+        if self.ppu.in_range(address) {
+            return self.ppu.read(address);
+        }
+
         if self.mapper.in_range(address) {
-            return self.mapper.read_prg(address - 0x6000);
+            return self.mapper.read_prg(address);
+        }
+
+        if (address >= 0x4000) && (address <= 0x4020) {
+            return 0;
         }
 
         panic!("read from unknown memory region 0x{:04x}", address)
     }
+
+	pub fn redraw(&mut self) -> bool {
+		self.ppu.redraw()
+	}
+
+	pub fn step_ppu(&mut self) {
+		self.ppu.step();
+	}
 
     pub fn write(&mut self, address: u16, value: u8) {
         let address = address as usize;
@@ -39,8 +69,16 @@ impl Bus {
             return self.ram[address % RAM_SIZE] = value;
         }
 
+        if self.ppu.in_range(address) {
+            return self.ppu.write(address, value as usize);
+        }
+
         if self.mapper.in_range(address) {
-            return self.mapper.write_prg(address - 0x6000, value as usize);
+            return self.mapper.write_prg(address, value as usize);
+        }
+
+        if (address >= 0x4000) && (address <= 0x4020) {
+            return;
         }
 
         panic!("write to unknown memory region 0x{:04x}", address)

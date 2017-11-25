@@ -1,8 +1,10 @@
+use nes::rom::MirrorMode;
 use nes::rom::Rom;
 use nes::mappers::nrom::Nrom;
 
 pub trait Mapper {
     fn in_range(&self, address: usize) -> bool;
+    fn mirroring(&self) -> MirrorMode;
     fn read_chr(&self, address: usize) -> u8;
     fn read_prg(&self, address: usize) -> u8;
     fn write_chr(&self, address: usize, value: usize);

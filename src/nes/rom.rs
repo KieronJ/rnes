@@ -4,6 +4,12 @@ pub const ROM_CHR_BANK_SIZE:    usize = 8192;
 pub const ROM_HEADER_SIZE:      usize = 16;
 pub const ROM_PRG_BANK_SIZE:    usize = 16384;
 
+pub enum MirrorMode {
+    Horizontal,
+    Vertical,
+    FourScreen,
+}
+
 #[derive(Clone)]
 pub struct INesHeader {
     magic: [u8; 4],
@@ -62,6 +68,16 @@ impl Rom {
 
     pub fn mapper(&self) -> u8 {
         (self.header.flags6 >> 4) | (self.header.flags7 & 0xf0)
+    }
+
+    pub fn mirroring(&self) -> MirrorMode {
+        match self.header.flags6 & 0x09 {
+            0 => MirrorMode::Horizontal,
+            1 => MirrorMode::Vertical,
+            8 => MirrorMode::FourScreen,
+            9 => MirrorMode::FourScreen,
+            _ => unreachable!()
+        }
     }
 
     pub fn read_chr(&self, address: u16) -> u8 {

@@ -1,3 +1,5 @@
+extern crate sdl2;
+
 mod instructions;
 mod load;
 mod status;
@@ -17,13 +19,38 @@ pub struct Ricoh2A03 {
 }
 
 impl Ricoh2A03 {
+	pub fn check_nmi(&mut self) -> bool {
+		self.bus.check_nmi()
+	}
+
+    pub fn clear_nmi(&mut self) {
+        self.bus.clear_nmi();
+    }
+
+    pub fn copy_framebuffer(&self, texture: &mut sdl2::render::Texture) {
+        self.bus.copy_framebuffer(texture);
+    }
+
+    pub fn handle_nmi(&mut self) {
+		let return_address = self.pc;
+		self.push16(return_address);
+
+		let status = self.p.read();
+		self.push8(status);
+		self.p.interrupt = true;
+		
+		self.pc = self.read16(0xfffa);
+
+        self.clear_nmi();
+    }
+
     pub fn new(bus: Bus) -> Ricoh2A03 {
         let mut cpu = Ricoh2A03 {
             pc: 0,
             a: 0,
             x: 0,
             y: 0,
-            s: 0,
+            s: 0xfd,
             p: Status::new(),
             bus: bus,
         };
@@ -55,16 +82,20 @@ impl Ricoh2A03 {
 		lo | (hi << 8)
 	}
 
-    pub fn read8(&self, address: u16) -> u8 {
+    pub fn read8(&mut self, address: u16) -> u8 {
         self.bus.read(address)
     }
 
-    pub fn read16(&self, address: u16) -> u16 {
+    pub fn read16(&mut self, address: u16) -> u16 {
         (self.read8(address) as u16) | ((self.read8(address + 1) as u16) << 8)
     }
 
+	pub fn redraw(&mut self) -> bool {
+		self.bus.redraw()
+	}
+
     pub fn reset(&mut self) {
-        self.pc = 0xc000;//self.read16(0xfffc);
+        self.pc = self.read16(0xfffc);
     }
 
 	fn set_nz(&mut self, value: u8) {
@@ -73,7 +104,8 @@ impl Ricoh2A03 {
 	}
 
     pub fn step(&mut self) {
-        let opcode = self.read8(self.pc);
+		let pc = self.pc;
+        let opcode = self.read8(pc);
         self.pc += 1;
 
         let a = self.a;
@@ -85,76 +117,78 @@ impl Ricoh2A03 {
         print!("0x{:04x}: ", pc - 1);
 
         match opcode {
+			0x00 => { println!("BRK"); self.p.interrupt = true; self.push16(pc.wrapping_add(1)); let value = self.p.read() | 0x10; self.push8(value); self.pc = self.read16(0xfffe); }
             0x01 => { println!("ORA ind,x"); let value = self.load_ind_x(); self.ora(value); },
 			0x05 => { println!("ORA zp"); let value = self.load_zp(); self.ora(value); },
-			//0x06 => { println!("ASL zp"); let value = self.asl_zp(); self.store_zp(value); },
-			0x08 => { println!("PHP"); let value = self.p.read() | 0x30; self.push8(value); },
+			0x06 => { println!("ASL zp"); let mut value = self.load_zp(); self.pc -= 1; value = self.asl(value); self.store_zp(value); },
+			0x08 => { println!("PHP"); let value = self.p.read() | 0x10; self.push8(value); },
 			0x09 => { println!("ORA #"); let value = self.load_imm(); self.ora(value); },
 			0x0a => { println!("ASL A"); self.a = self.asl(a); },
 			0x0d => { println!("ORA abs"); let value = self.load_abs(); self.ora(value); },
-			//0x0e => { println!("ASL abs"); let value = self.asl_abs(); self.store_abs(value); },
+			0x0e => { println!("ASL abs"); let mut value = self.load_abs(); self.pc -= 2; value = self.asl(value); self.store_abs(value); },
             0x10 => { println!("BPL"); let value = self.load_imm(); if !self.p.negative { self.branch(value) }; },
             0x11 => { println!("ORA ind,y"); let value = self.load_ind_y(); self.ora(value); },
 			0x15 => { println!("ORA zp,x"); let value = self.load_zp_x(); self.ora(value); },
-			//0x16 => { println!("ASL zp,x"); let value = self.asl_zp_x(); self.store_zp_x(value); },
+			0x16 => { println!("ASL zp,x"); let mut value = self.load_zp_x(); self.pc -= 1; value = self.asl(value); self.store_zp_x(value); },
             0x18 => { println!("CLC"); self.p.carry = false; },
             0x19 => { println!("ORA abs,y"); let value = self.load_abs_y(); self.ora(value); },
 			0x1d => { println!("ORA abs,x"); let value = self.load_abs_x(); self.ora(value); },
-			//0x1e => { println!("ASL abs,x"); let value = self.asl_abs_x(); self.store_abs_x(value); },
+			0x1e => { println!("ASL abs,x"); let mut value = self.load_abs_x(); self.pc -= 2; value = self.asl(value); self.store_abs_x(value); },
             0x20 => { println!("JSR"); self.push16(pc.wrapping_add(1)); self.pc = self.read16(pc); },
             0x21 => { println!("AND ind,x"); let value = self.load_ind_x(); self.and(value); },
             0x24 => { println!("BIT zp"); let value = self.load_zp(); self.bit(value); },
             0x25 => { println!("AND zp"); let value = self.load_zp(); self.and(value); },
-			//0x26 => { println!("ROL zp"); let value = self.rol_zp(); self.store_zp(value); },
-			0x28 => { println!("PLP"); let value = self.pop8(); self.p.write(value); }
+			0x26 => { println!("ROL zp"); let mut value = self.load_zp(); value = self.rol(value); self.pc -= 1; self.store_zp(value); },
+			0x28 => { println!("PLP"); let value = self.pop8(); self.p.write(value); },
 			0x29 => { println!("AND #"); let value = self.load_imm(); self.and(value); },
 			0x2a => { println!("ROL A"); self.a = self.rol(a); },
 			0x2c => { println!("BIT abs"); let value = self.load_abs(); self.bit(value); },
 			0x2d => { println!("AND abs"); let value = self.load_abs(); self.and(value); },
-			//0x2e => { println!("ROL abs"); let value = self.rol_abs(); self.store_abs(value); },
+			0x2e => { println!("ROL abs"); let mut value = self.load_abs(); value = self.rol(value); self.pc -= 2; self.store_abs(value); },
 			0x30 => { println!("BMI"); let value = self.load_imm(); if self.p.negative { self.branch(value) }; },
 			0x31 => { println!("AND ind,y"); let value = self.load_ind_y(); self.and(value); },
 			0x35 => { println!("AND zp,x"); let value = self.load_zp_x(); self.and(value); },
-			//0x36 => { println!("ROL zp, x"); let value = self.rol_zp_x(); self.store_zp_x(value); },
+			0x36 => { println!("ROL zp,x"); let mut value = self.load_zp_x(); value = self.rol(value); self.pc -= 1; self.store_zp_x(value); },
             0x38 => { println!("SEC"); self.p.carry = true; },
             0x39 => { println!("AND abs,y"); let value = self.load_abs_y(); self.and(value); },
 			0x3d => { println!("AND abs,x"); let value = self.load_abs_x(); self.and(value); },
-			//0x3e => { println!("ROL abs,x"); let value = self.rol_abs_x(); self.store_abs_x(value); },
+			0x3e => { println!("ROL abs,x"); let mut value = self.load_abs_x(); value = self.rol(value); self.pc -= 2; self.store_abs_x(value); },
 			0x40 => { println!("RTI"); let p = self.pop8(); self.p.write(p); self.pc = self.pop16(); },
 			0x41 => { println!("EOR ind,x"); let value = self.load_ind_x(); self.eor(value); },
 			0x45 => { println!("EOR zp"); let value = self.load_zp(); self.eor(value); },
-			//0x46 => { println!("LSR zp"); let value = self.lsr_zp(); self.store_zp(value); },
+			0x46 => { println!("LSR zp"); let mut value = self.load_zp(); self.pc -= 1; value = self.lsr(value); self.store_zp(value); },
 			0x48 => { println!("PHA"); self.push8(a); },
 			0x49 => { println!("EOR #"); let value = self.load_imm(); self.eor(value); },
 			0x4a => { println!("LSR A"); self.a = self.lsr(a); },
             0x4c => { println!("JMP abs"); self.pc = self.read16(pc); },
             0x4d => { println!("EOR abs"); let value = self.load_abs(); self.eor(value); },
-			//0x4e => { println!("LSR abs"); let value = self.lsr_abs(); self.store_abs(value); },
+			0x4e => { println!("LSR abs"); let mut value = self.load_abs(); self.pc -= 2; value = self.lsr(value); self.store_abs(value); },
             0x50 => { println!("BVC"); let value = self.load_imm(); if !self.p.overflow { self.branch(value) }; },
             0x51 => { println!("EOR ind,y"); let value = self.load_ind_y(); self.eor(value); },
 			0x55 => { println!("EOR zp,x"); let value = self.load_zp_x(); self.eor(value); },
-			//0x56 => { println!("LSR zp,x"); let value = self.lsr_zp_x(); self.store_zp_x(value); },
+			0x56 => { println!("LSR zp,x"); let mut value = self.load_zp_x(); self.pc -= 1; value = self.lsr(value); self.store_zp_x(value); },
+			0x58 => { println!("CLI"); self.p.interrupt = false; },
 			0x59 => { println!("EOR abs,y"); let value = self.load_abs_y(); self.eor(value); },
 			0x5d => { println!("EOR abs,x"); let value = self.load_abs_x(); self.eor(value); },
-			//0x5e => { println!("LSR abs,x"); let value = self.lsr_abs_x(); self.store_abs_x(value); },
+			0x5e => { println!("LSR abs,x"); let mut value = self.load_abs_x(); self.pc -= 2; value = self.lsr(value); self.store_abs_x(value); },
             0x60 => { println!("RTS"); self.pc = self.pop16().wrapping_add(1); },
 			0x61 => { println!("ADC ind,x"); let value = self.load_ind_x(); self.adc(value); },
 			0x65 => { println!("ADC zp"); let value = self.load_zp(); self.adc(value); },
-			//0x66 => { println!("ROR zp"); let value = self.ror_zp(); self.store_zp(value); },
+			0x66 => { println!("ROR zp"); let mut value = self.load_zp(); self.pc -= 1; value = self.ror(value); self.store_zp(value); },
 			0x68 => { println!("PLA"); let value = self.pop8(); self.a = value; self.set_nz(value); }
 			0x69 => { println!("ADC #"); let value = self.load_imm(); self.adc(value); },
 			0x6a => { println!("ROR A"); self.a = self.ror(a); },
-			0x6d => { println!("ADC abs"); let value = self.load_abs(); self.adc(value); },
 			0x6c => { println!("JMP ind"); self.jmp_ind(); },
-			//0x6e => { println!("ROR abs"); let value = self.ror_abs(); self.store_abs(value); },
+			0x6d => { println!("ADC abs"); let value = self.load_abs(); self.adc(value); },
+			0x6e => { println!("ROR abs"); let mut value = self.load_abs(); self.pc -= 2; value = self.ror(value); self.store_abs(value); },
 			0x70 => { println!("BVS"); let value = self.load_imm(); if self.p.overflow { self.branch(value) }; },
 			0x71 => { println!("ADC ind,y"); let value = self.load_ind_y(); self.adc(value); },
 			0x75 => { println!("ADC zp,x"); let value = self.load_zp_x(); self.adc(value); },
-			//0x76 => { println!("ROR zp, x"); let value = self.ror_zp_x(); self.store_zp_x(value); },
+			0x76 => { println!("ROR zp,x"); let mut value = self.load_zp_x(); self.pc -= 1; value = self.ror(value); self.store_zp_x(value); },
 			0x78 => { println!("SEI"); self.p.interrupt = true; },
 			0x79 => { println!("ADC abs,y"); let value = self.load_abs_y(); self.adc(value); },
 			0x7d => { println!("ADC abs,x"); let value = self.load_abs_x(); self.adc(value); },
-			//0x7e => { println!("ROR abs,x"); let value = self.ror_abs_x(); self.store_abs_x(value); },
+			0x7e => { println!("ROR abs,x"); let mut value = self.load_abs_x(); self.pc -= 2; value = self.ror(value); self.store_abs_x(value); },
 			0x81 => { println!("STA ind,x"); self.store_ind_x(a); },
 			0x84 => { println!("STY zp"); self.store_zp(y); },
 			0x85 => { println!("STA zp"); self.store_zp(a); },
@@ -200,43 +234,49 @@ impl Ricoh2A03 {
 			0xc1 => { println!("CMP ind,x"); let value = self.load_ind_x(); self.cmp(value); },
 			0xc4 => { println!("CPY zp"); let value = self.load_zp(); self.cpy(value); },
 			0xc5 => { println!("CMP zp"); let value = self.load_zp(); self.cmp(value); },
-			//0xc6 => { println!("DEC zp"); self.dec_zp(); },
+			0xc6 => { println!("DEC zp"); let mut value = self.load_zp(); self.pc -= 1; value = self.dec(value); self.store_zp(value); },
 			0xc8 => { println!("INY"); let y = y.wrapping_add(1); self.y = y; self.set_nz(y); },
 			0xc9 => { println!("CMP imm"); let value = self.load_imm(); self.cmp(value); },
 			0xca => { println!("DEX"); let x = x.wrapping_sub(1); self.x = x; self.set_nz(x); },
 			0xcc => { println!("CPY abs"); let value = self.load_abs(); self.cpy(value); },
 			0xcd => { println!("CMP abs"); let value = self.load_abs(); self.cmp(value); },
-			//0xce => { println!("DEC abs"); self.dec_abs(); },
+			0xce => { println!("DEC abs"); let mut value = self.load_abs(); self.pc -= 2; value = self.dec(value); self.store_abs(value); },
 			0xd0 => { println!("BNE"); let value = self.load_imm(); if !self.p.zero { self.branch(value) }; },
 			0xd1 => { println!("CMP ind,y"); let value = self.load_ind_y(); self.cmp(value); },
 			0xd5 => { println!("CMP zp,x"); let value = self.load_zp_x(); self.cmp(value); },
-			//0xd6 => { println!("DEC zp,x"); self.dec_zp_x(); },
+			0xd6 => { println!("DEC zp,x"); let mut value = self.load_zp_x(); self.pc -= 1; value = self.dec(value); self.store_zp_x(value); },
 			0xd8 => { println!("CLD"); self.p.decimal = false; },
 			0xd9 => { println!("CMP abs,y"); let value = self.load_abs_y(); self.cmp(value); },
 			0xdd => { println!("CMP abs,x"); let value = self.load_abs_x(); self.cmp(value); },
-			//0xde => { println!("DEC abs,x"); self.dec_abs_x(); },
+			0xde => { println!("DEC abs,x"); let mut value = self.load_abs_x(); self.pc -= 2; value = self.dec(value); self.store_abs_x(value); },
 			0xe0 => { println!("CPX #"); let value = self.load_imm(); self.cpx(value); },
 			0xe1 => { println!("SBC ind,x"); let value = self.load_ind_x(); self.adc(!value); },
 			0xe4 => { println!("CPX zp"); let value = self.load_zp(); self.cpx(value); },
 			0xe5 => { println!("SBC zp"); let value = self.load_zp(); self.adc(!value); },
-			//0xe6 => { println!("INC zp"); self.inc_zp(); },
+			0xe6 => { println!("INC zp"); let mut value = self.load_zp(); self.pc -= 1; value = self.inc(value); self.store_zp(value); },
 			0xe8 => { println!("INX"); let x = x.wrapping_add(1); self.x = x; self.set_nz(x); },
 			0xe9 => { println!("SBC #"); let value = self.load_imm(); self.adc(!value); },
 			0xea => { println!("NOP"); },
 			0xec => { println!("CPX abs"); let value = self.load_abs(); self.cpx(value); },
 			0xed => { println!("SBC abs"); let value = self.load_abs(); self.adc(!value); },
-			//0xee => { println!("INC abs"); self.inc_abs(); },
+			0xee => { println!("INC abs"); let mut value = self.load_abs(); self.pc -= 2; value = self.inc(value); self.store_abs(value); },
 			0xf0 => { println!("BEQ"); let value = self.load_imm(); if self.p.zero { self.branch(value) }; },
 			0xf1 => { println!("SBC ind,y"); let value = self.load_ind_y(); self.adc(!value); },
 			0xf5 => { println!("SBC zp,x"); let value = self.load_zp_x(); self.adc(!value); },
-			//0xf6 => { println!("INC zp,x"); self.inc_zp_x(); },
+			0xf6 => { println!("INC zp,x"); let mut value = self.load_zp_x(); self.pc -= 1; value = self.inc(value); self.store_zp_x(value); },
 			0xf8 => { println!("SED"); self.p.decimal = true; },
 			0xf9 => { println!("SBC abs,y"); let value = self.load_abs_y(); self.adc(!value); },
 			0xfd => { println!("SBC abs,x"); let value = self.load_abs_x(); self.adc(!value); },
-			//0xfe => { println!("INC abs,x"); self.inc_abs_x(); },
+			0xfe => { println!("INC abs,x"); let mut value = self.load_abs_x(); self.pc -= 2; value = self.inc(value); self.store_abs_x(value); },
             _ => panic!("unimplemented opcode 0x{:02x}", opcode)
         }
+
+		//println!("A:0x{:02x} X:0x{:02x} Y:0x{:02x} P:0x{:02x} S:0x{:02x}", self.a, self.x, self.y, self.p.read(), self.s);
     }
+
+	pub fn step_ppu(&mut self) {
+		self.bus.step_ppu();
+	}
 
     pub fn write8(&mut self, address: u16, value: u8) {
         self.bus.write(address, value)
