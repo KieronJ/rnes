@@ -13,8 +13,12 @@ pub const PPU_FRAMEBUFFER_SIZE: usize = PPU_FRAMEBUFFER_WIDTH *
                                         PPU_FRAMEBUFFER_HEIGHT *
                                         PPU_FRAMEBUFFER_CHANNELS;
 
-pub const PPU_NAMETABLE_SIZE: usize = 1024;
-pub const PPU_PALETTE_SIZE: usize = 32;
+pub const PPU_NAMETABLE_START: usize = 0x2000;
+pub const PPU_NAMETABLE_SIZE: usize = 0x400;
+pub const PPU_NAMETABLE_WIDTH: usize = 512;
+pub const PPU_NAMETABLE_HEIGHT: usize = 480;
+
+pub const PPU_PALETTE_SIZE: usize = 0x20;
 
 pub const PPU_POSTRENDER_LINE: usize = 240;
 pub const PPU_PRERENDER_LINE: usize = 261;
@@ -29,10 +33,12 @@ pub const PPU_CTRL: usize = 0x2000;
 pub const PPU_CTRL_NMI: u8 = 0x80;
 pub const PPU_CTRL_PPU_MASTER_SLAVE: u8 = 0x40;
 pub const PPU_CTRL_SPRITE_HEIGHT: u8 = 0x20;
-pub const PPU_CTRL_BG_TILE: u8 = 0x10;
-pub const PPU_CTRL_SPRITE_TILE: u8 = 0x08;
+pub const PPU_CTRL_BG_TABLE: u8 = 0x10;
+pub const PPU_CTRL_SPRITE_TABLE: u8 = 0x08;
 pub const PPU_CTRL_INCREMENT: u8 = 0x04;
 pub const PPU_CTRL_NAMETABLE: u8 = 0x03;
+pub const PPU_CTRL_NAMETABLE_X: u8 = 0x02;
+pub const PPU_CTRL_NAMETABLE_Y: u8 = 0x01;
 
 pub const PPU_MASK: usize = 0x2001;
 pub const PPU_MASK_COLOUR_EMPHASIS: u8 = 0xe0;
@@ -93,10 +99,11 @@ pub struct Ricoh2C02 {
     oam_address: u8,
 
     scroll: u16,
-    scroll_latch: bool,
-
     address: u16,
-    address_latch: bool,
+
+    buffer: u8,
+
+    toggle: bool,
 
     oamdma: bool,
 }
@@ -129,26 +136,27 @@ impl Ricoh2C02 {
             oam_address: 0,
 
             scroll: 0,
-            scroll_latch: false,
-
             address: 0,
-            address_latch: false,
+
+            buffer: 0,
+
+            toggle: false,
 
             oamdma: false,
         }
     }
 
-	pub fn check_nmi(&self) -> bool {
+    pub fn clear_nmi(&mut self) {
+        self.nmi_occured = false;
+    }
+
+	pub fn should_nmi(&self) -> bool {
         if (self.controller & PPU_CTRL_NMI != 0) && (self.nmi_occured) {
             return true;
         }
 
         return false;
 	}
-
-    pub fn clear_nmi(&mut self) {
-        self.nmi_occured = false;
-    }
 
     pub fn in_range(&self, address: usize) -> bool {
         if address == PPU_OAMDMA || ((address >= PPU_START) && (address <= PPU_END)) {
@@ -174,8 +182,7 @@ impl Ricoh2C02 {
                 self.latch |= self.status & PPU_STATUS_USED;
                 self.status &= !PPU_STATUS_VBLANK;
                 self.nmi_occured = false;
-                self.scroll_latch = false;
-		        self.address_latch = false;
+                self.toggle = false;
             },
             PPU_OAMADDR => {
                 println!("PPU_READ: PPU_OAMADDR");
@@ -193,12 +200,19 @@ impl Ricoh2C02 {
             PPU_DATA => {
                 println!("PPU_READ: PPU_DATA");
                 let address = self.address as usize;
-                self.latch = self.read_vram(address);
+
+                if address >= 0x3f00 {
+                    self.latch = self.read_vram(address);
+                    self.buffer = self.read_nametable(address - 0x3000);
+                } else {
+                    self.latch = self.buffer;
+                    self.buffer = self.read_vram(address);
+                }
 
                 if (self.controller & PPU_CTRL_INCREMENT) != 0 {
-                    self.address += 32;
+                    self.address = self.address.wrapping_add(32);
                 } else {
-                    self.address += 1;
+                    self.address = self.address.wrapping_add(1);
                 }
             },
             PPU_OAMADDR => {
@@ -216,55 +230,146 @@ impl Ricoh2C02 {
         redraw
 	}
 
+    pub fn get_scroll_x(&self, offset: usize) -> usize {
+        let mut scroll = offset + (self.scroll >> 8) as usize;
+
+        if self.controller & PPU_CTRL_NAMETABLE_X != 0 {
+            scroll += 256;
+        }
+
+        if scroll >= PPU_NAMETABLE_WIDTH {
+            scroll -= PPU_NAMETABLE_WIDTH;
+        }
+
+        scroll
+    }
+
+    pub fn get_scroll_y(&self, offset: usize) -> usize {
+        let mut scroll = (self.scroll & 0xff) as usize;
+
+        if scroll >= 240 {
+            scroll = PPU_NAMETABLE_HEIGHT - (256 - scroll);
+        }
+
+        scroll += offset;
+
+        if self.controller & PPU_CTRL_NAMETABLE_Y != 0 {
+            scroll += 240;
+        }
+
+        if scroll >= PPU_NAMETABLE_HEIGHT {
+            scroll -= PPU_NAMETABLE_HEIGHT;
+        }
+
+        scroll
+    }
+
     pub fn scanline(&mut self) {
         for i in 0..256 {
-            let x = i;
-            let y = self.line as usize;
+            let mut x = self.get_scroll_x(i);
+            let mut y = self.get_scroll_y(self.line);
 
-            let tile_address = ((y / 8) * 32) + (x / 8);
-            let attribute_address = 0x3c0 + ((y / 32) * 8) + (x / 32); 
+            let tile = self.get_tile(x, y);
 
-            let tile = self.nametable_0[tile_address];
-            let attribute_byte = self.nametable_0[attribute_address];
-
-            let xhalf = (x % 32) / 16;
-            let yhalf = (y % 32) / 16;
-            let tile_portion = (yhalf * 2) + xhalf;
-
-            let palette = match tile_portion {
-                0 => (attribute_byte >> 0) & 0x03,
-                1 => (attribute_byte >> 2) & 0x03,
-                2 => (attribute_byte >> 4) & 0x03,
-                3 => (attribute_byte >> 6) & 0x03,
-                _ => unreachable!(),
-            };
-
-            let pattern_low = self.mapper.read_chr(0x1000 + (tile as usize * 16) + (y % 8));
-            let pattern_high = self.mapper.read_chr(0x1000 + (tile as usize * 16) + (y % 8) + 8);
-
-            let palette_index_low = (pattern_low >> (7 - (x % 8))) & 0x1;
-            let palette_index_high = (pattern_high >> (7 - (x % 8))) & 0x1;
-            let palette_index = (palette_index_high << 2) | palette_index_low;
-
-            let mut colour_index;
-
-            if palette_index == 0 {
-                colour_index = self.palette[0] as usize;
-            } else {
-                colour_index = self.palette[(palette as usize * 4) + palette_index as usize] as usize;
-            }
+            let palette = self.get_bg_palette(x, y);
+            let palette_index = self.get_bg_pattern(tile, x, y);
+            let colour_index = self.get_bg_colour(palette, palette_index);
 
             let colour_red = PALETTE[(colour_index * 3)];
             let colour_green = PALETTE[(colour_index * 3) + 1];
             let colour_blue = PALETTE[(colour_index * 3) + 2];
 
-            self.framebuffer[(y * PPU_FRAMEBUFFER_STRIDE) + (x * PPU_FRAMEBUFFER_CHANNELS)] = colour_red;
-            self.framebuffer[(y * PPU_FRAMEBUFFER_STRIDE) + (x * PPU_FRAMEBUFFER_CHANNELS) + 1] = colour_green;
-            self.framebuffer[(y * PPU_FRAMEBUFFER_STRIDE) + (x * PPU_FRAMEBUFFER_CHANNELS) + 2] = colour_blue;
+            self.framebuffer[(self.line * PPU_FRAMEBUFFER_STRIDE) + (i * PPU_FRAMEBUFFER_CHANNELS)] = colour_red;
+            self.framebuffer[(self.line * PPU_FRAMEBUFFER_STRIDE) + (i * PPU_FRAMEBUFFER_CHANNELS) + 1] = colour_green;
+            self.framebuffer[(self.line * PPU_FRAMEBUFFER_STRIDE) + (i * PPU_FRAMEBUFFER_CHANNELS) + 2] = colour_blue;
         }
     }
 
-    pub fn copy_framebuffer(&self, texture: &mut sdl2::render::Texture) {
+    pub fn get_bg_pattern_table(&self) -> usize {
+        ((self.controller & PPU_CTRL_BG_TABLE) >> 4) as usize
+    }
+
+    pub fn get_bg_colour(&self, palette: usize, index: usize) -> usize {
+        if index == 0 {
+            (self.palette[0] % 0x40) as usize
+        } else {
+            (self.palette[(palette as usize * 4) + index as usize] % 0x40) as usize
+        }
+    }
+
+    pub fn get_bg_palette(&mut self, x: usize, y: usize) -> usize {
+        let mut nametable = 0;
+        let mut x = x;
+        let mut y = y;
+
+        if x >= PPU_FRAMEBUFFER_WIDTH && y < PPU_FRAMEBUFFER_HEIGHT {
+            nametable = 1;
+            x -= PPU_FRAMEBUFFER_WIDTH;
+        } else if x < PPU_FRAMEBUFFER_WIDTH && y >= PPU_FRAMEBUFFER_HEIGHT {
+            nametable = 2;
+            y -= PPU_FRAMEBUFFER_HEIGHT;
+        } else if x >= PPU_FRAMEBUFFER_WIDTH && y >= PPU_FRAMEBUFFER_HEIGHT {
+            nametable = 3;
+            x -= PPU_FRAMEBUFFER_WIDTH;
+            y -= PPU_FRAMEBUFFER_HEIGHT;
+        }
+
+        let attribute_address = 0x3c0 + ((y / 32) * 8) + (x / 32);
+        let nametable_address = PPU_NAMETABLE_START + (PPU_NAMETABLE_SIZE * nametable) + attribute_address;
+
+        let attribute_byte = self.read_vram(nametable_address);
+
+        let xhalf = (x % 32) / 16;
+        let yhalf = (y % 32) / 16;
+        let tile_portion = (yhalf * 2) + xhalf;
+
+        match tile_portion {
+            0 => ((attribute_byte >> 0) & 0x03) as usize,
+            1 => ((attribute_byte >> 2) & 0x03) as usize,
+            2 => ((attribute_byte >> 4) & 0x03) as usize,
+            3 => ((attribute_byte >> 6) & 0x03) as usize,
+             _ => unreachable!(),
+        }
+    }
+
+    pub fn get_bg_pattern(&self, tile: usize, x: usize, y: usize) -> usize {
+        let mut table_offset = 0x0;
+        
+        if self.get_bg_pattern_table() == 1 {
+            table_offset = 0x1000;
+        }
+
+        let pattern_low = self.mapper.read_chr(table_offset + (tile * 16) + (y % 8));
+        let pattern_high = self.mapper.read_chr(table_offset + (tile * 16) + (y % 8) + 8);
+
+        let palette_index_low = (pattern_low >> (7 - (x % 8))) & 0x1;
+        let palette_index_high = (pattern_high >> (7 - (x % 8))) & 0x1;
+        ((palette_index_high << 2) | palette_index_low) as usize
+    }
+
+    pub fn get_tile(&mut self, x: usize, y: usize) -> usize {
+        let mut nametable = 0;
+        let mut x = x;
+        let mut y = y;
+
+        if x >= PPU_FRAMEBUFFER_WIDTH && y < PPU_FRAMEBUFFER_HEIGHT {
+            nametable = 1;
+            x -= PPU_FRAMEBUFFER_WIDTH;
+        } else if x < PPU_FRAMEBUFFER_WIDTH && y >= PPU_FRAMEBUFFER_HEIGHT {
+            nametable = 2;
+            y -= PPU_FRAMEBUFFER_HEIGHT;
+        } else if x >= PPU_FRAMEBUFFER_WIDTH && y >= PPU_FRAMEBUFFER_HEIGHT {
+            nametable = 3;
+            x -= PPU_FRAMEBUFFER_WIDTH;
+            y -= PPU_FRAMEBUFFER_HEIGHT;
+        }
+
+        let tile_address = ((y / 8) * 32) + (x / 8);
+        let nametable_address = PPU_NAMETABLE_START + (PPU_NAMETABLE_SIZE * nametable) + tile_address;
+        self.read_vram(nametable_address) as usize
+    }
+
+    pub fn draw_screen(&self, texture: &mut sdl2::render::Texture) {
 			texture.with_lock(None, |buffer: &mut [u8], pitch: usize| {
         		for y in 0..240 {
             		for x in 0..256 {
@@ -353,25 +458,25 @@ impl Ricoh2C02 {
             },
             PPU_SCROLL => {
                 println!("PPU_WRITE: PPU_SCROLL");
-                if !self.scroll_latch {
+                if !self.toggle {
                     self.scroll &= 0x00ff;
                     self.scroll |= (self.latch as u16) << 8;
-                    self.scroll_latch = true;
                 } else {
                     self.scroll &= 0xff00;
                     self.scroll |= self.latch as u16;
                 }
+                self.toggle = !self.toggle;
             },
             PPU_ADDR => {
                 println!("PPU_WRITE: PPU_ADDR");
-                if !self.address_latch {
+                if !self.toggle {
                     self.address &= 0x00ff;
                     self.address |= (self.latch as u16) << 8;
-                    self.address_latch = true;
                 } else {
                     self.address &= 0xff00;
                     self.address |= self.latch as u16;
                 }
+                self.toggle = !self.toggle;
             },
             PPU_DATA => {
                 println!("PPU_WRITE: PPU_DATA");
@@ -380,9 +485,9 @@ impl Ricoh2C02 {
                 self.write_vram(address, latch);
 
                 if (self.controller & PPU_CTRL_INCREMENT) != 0 {
-                    self.address += 32;
+                    self.address = self.address.wrapping_add(32);
                 } else {
-                    self.address += 1;
+                    self.address = self.address.wrapping_add(1);
                 }
             },
             PPU_OAMADDR => {
@@ -454,22 +559,28 @@ impl Ricoh2C02 {
     }
 
     pub fn read_palette(&mut self, address: usize) -> u8 {
+        let mut address = address;
+
         if address == 0x10 || address == 0x14 || address == 0x18 || address == 0x1c {
-            address & 0x0f;
+            address &= 0x0f;
         }
 
         self.palette[address]
     }
 
     pub fn write_palette(&mut self, address: usize, value: u8) {
+        let mut address = address;
+
         if address == 0x10 || address == 0x14 || address == 0x18 || address == 0x1c {
-            address & 0x0f;
+            address &= 0x0f;
         }
 
         self.palette[address] = value;
     }
 
     pub fn read_vram(&mut self, address: usize) -> u8 {
+        let address = address % 0x4000;
+
         if address < 0x2000 {
             return self.mapper.read_chr(address);
         }
@@ -479,13 +590,15 @@ impl Ricoh2C02 {
         }
 
         if address < 0x4000 {
-            return self.read_palette((address - 0x3f00) % 0x20)
+            return self.read_palette((address - 0x3f00) % 0x20);
         }
 
-        panic!("read from unknown vram region 0x{:04x}", address)
+        unreachable!()
     }
 
     pub fn write_vram(&mut self, address: usize, value: usize) {
+        let address = address % 0x4000;
+
         if address < 0x2000 {
             return self.mapper.write_chr(address, value);
         }
@@ -495,9 +608,9 @@ impl Ricoh2C02 {
         }
 
         if address < 0x4000 {
-            return self.write_palette((address - 0x3f00) % 0x20, value as u8)
+            return self.write_palette((address - 0x3f00) % 0x20, value as u8);
         }
 
-        panic!("write to unknown vram region 0x{:04x}", address)
+        unreachable!()
     }
 }

@@ -47,10 +47,10 @@ impl Mapper for Nrom {
     }
 
     fn write_chr(&self, _: usize, _: usize) {
-        panic!("unsupported write to CHR")
+        println!("unsupported write to CHR")
     }
 
     fn write_prg(&self, _: usize, _: usize) {
-        println!("unsupported write to PRG")
+        panic!("unsupported write to PRG")
     }
 }

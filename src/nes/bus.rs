@@ -20,16 +20,12 @@ impl Bus {
         }
     }
 
-	pub fn check_nmi(&mut self) -> bool {
-		self.ppu.check_nmi()
-	}
-
     pub fn clear_nmi(&mut self) {
         self.ppu.clear_nmi();
     }
 
-    pub fn copy_framebuffer(&self, texture: &mut sdl2::render::Texture) {
-        self.ppu.copy_framebuffer(texture);
+    pub fn draw_screen(&self, texture: &mut sdl2::render::Texture) {
+        self.ppu.draw_screen(texture);
     }
 
     pub fn read(&mut self, address: u16) -> u8 {
@@ -58,7 +54,11 @@ impl Bus {
 		self.ppu.redraw()
 	}
 
-	pub fn step_ppu(&mut self) {
+	pub fn should_nmi(&self) -> bool {
+		self.ppu.should_nmi()
+	}
+
+	pub fn tick(&mut self) {
 		self.ppu.step();
 	}
 

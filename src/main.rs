@@ -6,6 +6,7 @@ mod util;
 use nes::bus::Bus;
 use nes::mapper::create_mapper;
 use nes::ricoh2c02::Ricoh2C02;
+use nes::ricoh2a03::InterruptType;
 use nes::ricoh2a03::Ricoh2A03;
 use nes::rom::Rom;
 use sdl2::event::*;
@@ -15,7 +16,7 @@ use sdl2::rect::Rect;
 use util::open_file;
 
 fn main() {
-	let mut rom_file = open_file("donkey_kong.nes").unwrap();
+	let mut rom_file = open_file("smb.nes").unwrap();
 	let rom = Rom::new(&mut rom_file);
 
 	let mapper = create_mapper(rom.clone());
@@ -49,19 +50,20 @@ fn main() {
 			}
 		}
 
-		if cpu.check_nmi() {
-			cpu.handle_nmi();
+		if cpu.should_nmi() {
+			cpu.interrupt(InterruptType::NMI);
+			cpu.clear_nmi();
 		}
 
+		//if cpu.should_irq() {
+		//	cpu.interrupt(InterruptType::IRQ);
+		//}
+
 		cpu.step();
-		
-		for _ in 0..3 {
-			cpu.step_ppu();
-		}
 
 		if cpu.redraw() {
 			sdl_canvas.clear();
-			cpu.copy_framebuffer(&mut sdl_texture);
+			cpu.draw_screen(&mut sdl_texture);
 			sdl_canvas.copy(&sdl_texture, None, Some(Rect::new(0, 0, 256, 240))).unwrap();
 			sdl_canvas.present();
 		}
