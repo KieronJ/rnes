@@ -217,7 +217,7 @@ macro_rules! php {
 	($cpu: expr) => {
 		$cpu.tick();
 		let status = $cpu.p.read();
-		let brk_flag = (1 << 4);
+		let brk_flag = 1 << 4;
 		$cpu.push8(status | brk_flag);
 	};
 }
@@ -410,8 +410,6 @@ impl Ricoh2A03 {
 	pub fn step(&mut self) {
 		let pc = self.imm();
         let opcode = self.read8(pc);
-
-		//println!("A:{:02x}\tX:{:02x}\tY:{:02x}\tP:{:02x}\tS:{:02x}", self.a, self.x, self.y, self.p.read(), self.s);
 
         print!("0x{:04x}: ", pc);
 

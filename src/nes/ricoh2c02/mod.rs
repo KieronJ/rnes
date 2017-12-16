@@ -3,58 +3,12 @@ extern crate sdl2;
 use nes::mapper::Mapper;
 use nes::rom::MirrorMode;
 
-pub const PPU_OAM_SIZE: usize = 256;
-
-pub const PPU_FRAMEBUFFER_WIDTH: usize = 256;
-pub const PPU_FRAMEBUFFER_HEIGHT: usize = 240;
-pub const PPU_FRAMEBUFFER_CHANNELS: usize = 3;
-pub const PPU_FRAMEBUFFER_STRIDE: usize = PPU_FRAMEBUFFER_WIDTH * PPU_FRAMEBUFFER_CHANNELS;
-pub const PPU_FRAMEBUFFER_SIZE: usize = PPU_FRAMEBUFFER_WIDTH * 
-                                        PPU_FRAMEBUFFER_HEIGHT *
-                                        PPU_FRAMEBUFFER_CHANNELS;
-
-pub const PPU_NAMETABLE_START: usize = 0x2000;
-pub const PPU_NAMETABLE_SIZE: usize = 0x400;
-pub const PPU_NAMETABLE_WIDTH: usize = 512;
-pub const PPU_NAMETABLE_HEIGHT: usize = 480;
-
-pub const PPU_PALETTE_SIZE: usize = 0x20;
-
-pub const PPU_POSTRENDER_LINE: usize = 240;
-pub const PPU_PRERENDER_LINE: usize = 261;
-
-pub const PPU_STATUS_UPDATE_CYCLE: usize = 1;
-pub const PPU_ODD_SKIP_CYCLE: usize = 339;
-
 pub const PPU_START: usize = 0x2000;
-pub const PPU_END: usize = 0x3fff;
+pub const PPU_END: usize = 0x2007;
 
 pub const PPU_CTRL: usize = 0x2000;
-pub const PPU_CTRL_NMI: u8 = 0x80;
-pub const PPU_CTRL_PPU_MASTER_SLAVE: u8 = 0x40;
-pub const PPU_CTRL_SPRITE_HEIGHT: u8 = 0x20;
-pub const PPU_CTRL_BG_TABLE: u8 = 0x10;
-pub const PPU_CTRL_SPRITE_TABLE: u8 = 0x08;
-pub const PPU_CTRL_INCREMENT: u8 = 0x04;
-pub const PPU_CTRL_NAMETABLE: u8 = 0x03;
-pub const PPU_CTRL_NAMETABLE_X: u8 = 0x02;
-pub const PPU_CTRL_NAMETABLE_Y: u8 = 0x01;
-
 pub const PPU_MASK: usize = 0x2001;
-pub const PPU_MASK_COLOUR_EMPHASIS: u8 = 0xe0;
-pub const PPU_MASK_SPRITE_ENABLE: u8 = 0x10;
-pub const PPU_MASK_BG_ENABLE: u8 = 0x08;
-pub const PPU_MASK_SPRITE_LC_ENABLE: u8 = 0x04;
-pub const PPU_MASK_BG_LC_ENABLE: u8 = 0x02;
-pub const PPU_MASK_GREYSCALE: u8 = 0x01;
-
 pub const PPU_STATUS: usize = 0x2002;
-pub const PPU_STATUS_VBLANK: u8 = 0x80;
-pub const PPU_STATUS_SPRITE0_HIT: u8 = 0x40;
-pub const PPU_STATUS_SPRITE_OVERFLOW: u8 = 0x20;
-pub const PPU_STATUS_USED: u8 = 0xe0;
-pub const PPU_STATUS_UNUSED: u8 = 0x1f;
-
 pub const PPU_OAMADDR: usize = 0x2003;
 pub const PPU_OAMDATA: usize = 0x2004;
 pub const PPU_SCROLL: usize = 0x2005;
@@ -75,528 +29,576 @@ static PALETTE: [u8; 192] = [
 
 pub struct Ricoh2C02 {
     mapper: Box<Mapper+Send>,
+
+    framebuffer: Box<[u8]>,
+
     nametable_0: Box<[u8]>,
     nametable_1: Box<[u8]>,
     nametable_2: Box<[u8]>,
     nametable_3: Box<[u8]>,
+
     palette: Box<[u8]>,
-    oam: Box<[u8]>,
 
-    framebuffer: Box<[u8]>,
-    redraw: bool,
-
-    line: usize,
+    scanline: usize,
     cycle: usize,
     odd: bool,
 
-    nmi_occured: bool,
-
     latch: u8,
+    read_buffer: u8,
 
-    controller: u8,
-    mask: u8,
-    status: u8,
-    oam_address: u8,
+    nmi_enable: bool,
+    bg_pattern_table: u16,
+    vram_increment: u16,
 
-    scroll: u16,
-    address: u16,
+    vblank: bool,
 
-    buffer: u8,
+    nmi: bool,
+    redraw: bool,
 
-    toggle: bool,
+    vram_address: u16,
+    temp_vram_address: u16,
+    fine_x_scroll: u8,
 
-    oamdma: bool,
+    tile: u8,
+    tile_low: u8,
+    tile_high: u8,
+
+    pattern_shift_low: u16,
+    pattern_shift_high: u16,
+
+    attribute_latch_high: u8,
+    attribute_latch_low: u8,
+
+    attribute_shift_high: u8,
+    attribute_shift_low: u8,
+
+    write_toggle: bool,
 }
 
 impl Ricoh2C02 {
     pub fn new(mapper: Box<Mapper+Send>) -> Ricoh2C02 {
         Ricoh2C02 {
             mapper: mapper,
-            nametable_0: vec![0; PPU_NAMETABLE_SIZE].into_boxed_slice(),
-            nametable_1: vec![0; PPU_NAMETABLE_SIZE].into_boxed_slice(),
-            nametable_2: vec![0; PPU_NAMETABLE_SIZE].into_boxed_slice(),
-            nametable_3: vec![0; PPU_NAMETABLE_SIZE].into_boxed_slice(),
-            palette: vec![0; PPU_PALETTE_SIZE].into_boxed_slice(),
-            oam: vec![0; PPU_OAM_SIZE].into_boxed_slice(),
 
-            framebuffer: vec![0; PPU_FRAMEBUFFER_SIZE].into_boxed_slice(),
-            redraw: false,
+            framebuffer: vec![0; 256 * 240 * 3].into_boxed_slice(),
 
-            line: 0,
+            nametable_0: vec![0; 0x400].into_boxed_slice(),
+            nametable_1: vec![0; 0x400].into_boxed_slice(),
+            nametable_2: vec![0; 0x400].into_boxed_slice(),
+            nametable_3: vec![0; 0x400].into_boxed_slice(),
+
+            palette: vec![0; 0x20].into_boxed_slice(),
+
+            scanline: 0,
             cycle: 0,
             odd: false,
 
-            nmi_occured: false,
-
             latch: 0,
+            read_buffer: 0,
 
-            controller: 0,
-            mask: 0,
-            status: 0,
-            oam_address: 0,
+            nmi_enable: false,
+            bg_pattern_table: 0,
+            vram_increment: 1,
 
-            scroll: 0,
-            address: 0,
+            vblank: false,
 
-            buffer: 0,
+            nmi: false,
+            redraw: false,
 
-            toggle: false,
+            vram_address: 0,
+            temp_vram_address: 0,
+            fine_x_scroll: 0,
 
-            oamdma: false,
+            tile: 0,
+            tile_low: 0,
+            tile_high: 0,
+
+            pattern_shift_low: 0,
+            pattern_shift_high: 0,
+
+            attribute_latch_high: 0,
+            attribute_latch_low: 0,
+
+            attribute_shift_high: 0,
+            attribute_shift_low: 0,
+
+            write_toggle: false,
         }
-    }
-
-    pub fn clear_nmi(&mut self) {
-        self.nmi_occured = false;
-    }
-
-	pub fn should_nmi(&self) -> bool {
-        if (self.controller & PPU_CTRL_NMI != 0) && (self.nmi_occured) {
-            return true;
-        }
-
-        return false;
-	}
-
-    pub fn in_range(&self, address: usize) -> bool {
-        if address == PPU_OAMDMA || ((address >= PPU_START) && (address <= PPU_END)) {
-            return true;
-        }
-
-        return false;
-    }
-
-    pub fn read(&mut self, address: usize) -> u8 {
-        let address = PPU_START + (address % 8);
-
-        match address {
-            PPU_CTRL => {
-                println!("PPU_READ: PPU_CTRL");
-            },
-            PPU_MASK => {
-                println!("PPU_READ: PPU_MASK");
-            },
-            PPU_STATUS => {
-                println!("PPU_READ: PPU_STATUS");
-                self.latch &= PPU_STATUS_UNUSED;
-                self.latch |= self.status & PPU_STATUS_USED;
-                self.status &= !PPU_STATUS_VBLANK;
-                self.nmi_occured = false;
-                self.toggle = false;
-            },
-            PPU_OAMADDR => {
-                println!("PPU_READ: PPU_OAMADDR");
-            },
-            PPU_OAMDATA => {
-                println!("PPU_READ: PPU_OAMDATA");
-                //self.latch = self.oam_read();
-            },
-            PPU_SCROLL => {
-                println!("PPU_READ: PPU_SCROLL");
-            },
-            PPU_ADDR => {
-                println!("PPU_READ: PPU_ADDR");
-            },
-            PPU_DATA => {
-                println!("PPU_READ: PPU_DATA");
-                let address = self.address as usize;
-
-                if address >= 0x3f00 {
-                    self.latch = self.read_vram(address);
-                    self.buffer = self.read_nametable(address - 0x3000);
-                } else {
-                    self.latch = self.buffer;
-                    self.buffer = self.read_vram(address);
-                }
-
-                if (self.controller & PPU_CTRL_INCREMENT) != 0 {
-                    self.address = self.address.wrapping_add(32);
-                } else {
-                    self.address = self.address.wrapping_add(1);
-                }
-            },
-            PPU_OAMADDR => {
-                println!("PPU_READ: PPU_OAMADDR");
-            },
-            _ => unreachable!(),
-        }
-
-        return self.latch;
-    }
-
-	pub fn redraw(&mut self) -> bool {
-		let redraw = self.redraw;
-        self.redraw = false;
-        redraw
-	}
-
-    pub fn get_scroll_x(&self, offset: usize) -> usize {
-        let mut scroll = offset + (self.scroll >> 8) as usize;
-
-        if self.controller & PPU_CTRL_NAMETABLE_X != 0 {
-            scroll += 256;
-        }
-
-        if scroll >= PPU_NAMETABLE_WIDTH {
-            scroll -= PPU_NAMETABLE_WIDTH;
-        }
-
-        scroll
-    }
-
-    pub fn get_scroll_y(&self, offset: usize) -> usize {
-        let mut scroll = (self.scroll & 0xff) as usize;
-
-        if scroll >= 240 {
-            scroll = PPU_NAMETABLE_HEIGHT - (256 - scroll);
-        }
-
-        scroll += offset;
-
-        if self.controller & PPU_CTRL_NAMETABLE_Y != 0 {
-            scroll += 240;
-        }
-
-        if scroll >= PPU_NAMETABLE_HEIGHT {
-            scroll -= PPU_NAMETABLE_HEIGHT;
-        }
-
-        scroll
-    }
-
-    pub fn scanline(&mut self) {
-        for i in 0..256 {
-            let mut x = self.get_scroll_x(i);
-            let mut y = self.get_scroll_y(self.line);
-
-            let tile = self.get_tile(x, y);
-
-            let palette = self.get_bg_palette(x, y);
-            let palette_index = self.get_bg_pattern(tile, x, y);
-            let colour_index = self.get_bg_colour(palette, palette_index);
-
-            let colour_red = PALETTE[(colour_index * 3)];
-            let colour_green = PALETTE[(colour_index * 3) + 1];
-            let colour_blue = PALETTE[(colour_index * 3) + 2];
-
-            self.framebuffer[(self.line * PPU_FRAMEBUFFER_STRIDE) + (i * PPU_FRAMEBUFFER_CHANNELS)] = colour_red;
-            self.framebuffer[(self.line * PPU_FRAMEBUFFER_STRIDE) + (i * PPU_FRAMEBUFFER_CHANNELS) + 1] = colour_green;
-            self.framebuffer[(self.line * PPU_FRAMEBUFFER_STRIDE) + (i * PPU_FRAMEBUFFER_CHANNELS) + 2] = colour_blue;
-        }
-    }
-
-    pub fn get_bg_pattern_table(&self) -> usize {
-        ((self.controller & PPU_CTRL_BG_TABLE) >> 4) as usize
-    }
-
-    pub fn get_bg_colour(&self, palette: usize, index: usize) -> usize {
-        if index == 0 {
-            (self.palette[0] % 0x40) as usize
-        } else {
-            (self.palette[(palette as usize * 4) + index as usize] % 0x40) as usize
-        }
-    }
-
-    pub fn get_bg_palette(&mut self, x: usize, y: usize) -> usize {
-        let mut nametable = 0;
-        let mut x = x;
-        let mut y = y;
-
-        if x >= PPU_FRAMEBUFFER_WIDTH && y < PPU_FRAMEBUFFER_HEIGHT {
-            nametable = 1;
-            x -= PPU_FRAMEBUFFER_WIDTH;
-        } else if x < PPU_FRAMEBUFFER_WIDTH && y >= PPU_FRAMEBUFFER_HEIGHT {
-            nametable = 2;
-            y -= PPU_FRAMEBUFFER_HEIGHT;
-        } else if x >= PPU_FRAMEBUFFER_WIDTH && y >= PPU_FRAMEBUFFER_HEIGHT {
-            nametable = 3;
-            x -= PPU_FRAMEBUFFER_WIDTH;
-            y -= PPU_FRAMEBUFFER_HEIGHT;
-        }
-
-        let attribute_address = 0x3c0 + ((y / 32) * 8) + (x / 32);
-        let nametable_address = PPU_NAMETABLE_START + (PPU_NAMETABLE_SIZE * nametable) + attribute_address;
-
-        let attribute_byte = self.read_vram(nametable_address);
-
-        let xhalf = (x % 32) / 16;
-        let yhalf = (y % 32) / 16;
-        let tile_portion = (yhalf * 2) + xhalf;
-
-        match tile_portion {
-            0 => ((attribute_byte >> 0) & 0x03) as usize,
-            1 => ((attribute_byte >> 2) & 0x03) as usize,
-            2 => ((attribute_byte >> 4) & 0x03) as usize,
-            3 => ((attribute_byte >> 6) & 0x03) as usize,
-             _ => unreachable!(),
-        }
-    }
-
-    pub fn get_bg_pattern(&self, tile: usize, x: usize, y: usize) -> usize {
-        let mut table_offset = 0x0;
-        
-        if self.get_bg_pattern_table() == 1 {
-            table_offset = 0x1000;
-        }
-
-        let pattern_low = self.mapper.read_chr(table_offset + (tile * 16) + (y % 8));
-        let pattern_high = self.mapper.read_chr(table_offset + (tile * 16) + (y % 8) + 8);
-
-        let palette_index_low = (pattern_low >> (7 - (x % 8))) & 0x1;
-        let palette_index_high = (pattern_high >> (7 - (x % 8))) & 0x1;
-        ((palette_index_high << 2) | palette_index_low) as usize
-    }
-
-    pub fn get_tile(&mut self, x: usize, y: usize) -> usize {
-        let mut nametable = 0;
-        let mut x = x;
-        let mut y = y;
-
-        if x >= PPU_FRAMEBUFFER_WIDTH && y < PPU_FRAMEBUFFER_HEIGHT {
-            nametable = 1;
-            x -= PPU_FRAMEBUFFER_WIDTH;
-        } else if x < PPU_FRAMEBUFFER_WIDTH && y >= PPU_FRAMEBUFFER_HEIGHT {
-            nametable = 2;
-            y -= PPU_FRAMEBUFFER_HEIGHT;
-        } else if x >= PPU_FRAMEBUFFER_WIDTH && y >= PPU_FRAMEBUFFER_HEIGHT {
-            nametable = 3;
-            x -= PPU_FRAMEBUFFER_WIDTH;
-            y -= PPU_FRAMEBUFFER_HEIGHT;
-        }
-
-        let tile_address = ((y / 8) * 32) + (x / 8);
-        let nametable_address = PPU_NAMETABLE_START + (PPU_NAMETABLE_SIZE * nametable) + tile_address;
-        self.read_vram(nametable_address) as usize
     }
 
     pub fn draw_screen(&self, texture: &mut sdl2::render::Texture) {
-			texture.with_lock(None, |buffer: &mut [u8], pitch: usize| {
-        		for y in 0..240 {
-            		for x in 0..256 {
-                	    let offset = (y * pitch) + (x * 3);
-                	    buffer[offset] = self.framebuffer[(y * PPU_FRAMEBUFFER_STRIDE) + (x * PPU_FRAMEBUFFER_CHANNELS)];
-                	    buffer[offset + 1] = self.framebuffer[(y * PPU_FRAMEBUFFER_STRIDE) + (x * PPU_FRAMEBUFFER_CHANNELS) + 1];
-                	    buffer[offset + 2] = self.framebuffer[(y * PPU_FRAMEBUFFER_STRIDE) + (x * PPU_FRAMEBUFFER_CHANNELS) + 2];
-            		}
-        		}
-    		}).unwrap();
+        texture.with_lock(None, |buffer: &mut [u8], pitch: usize| {
+            for y in 0..240 {
+                for x in 0..256 {
+                    let offset = y * pitch + x * 3;
+                    buffer[offset] = self.framebuffer[((y * 256) + x) * 3];
+                    buffer[offset + 1] = self.framebuffer[(((y * 256) + x) * 3) + 1];
+                    buffer[offset + 2] = self.framebuffer[(((y * 256) + x) * 3) + 2];
+                }
+            }
+        }).unwrap();
     }
 
-    pub fn step(&mut self) {
-        match self.line {
-            PPU_PRERENDER_LINE => {
-                match self.cycle {
-                    PPU_STATUS_UPDATE_CYCLE => {
-                        self.status &= PPU_STATUS_UNUSED;
-                        self.nmi_occured = false;
-                        self.redraw = false;
+    pub fn in_range(&self, address: u16) -> bool {
+        let address = address as usize;
+
+        if (address >= PPU_START) && (address <= PPU_END) ||
+            address == PPU_OAMDMA {
+            return true;
+        }
+
+        return false;
+    }
+
+    fn increment_x(&mut self) {
+        if (self.vram_address & 0x001f) == 31 {
+            self.vram_address &= !0x001f;
+            self.vram_address ^= 0x0400;
+        }
+        else {
+            self.vram_address += 1;
+        }
+    }
+
+    fn increment_y(&mut self) {
+        if (self.vram_address & 0x7000) != 0x7000 {
+            self.vram_address += 0x1000;
+        }
+        else {
+            self.vram_address &= !0x7000;
+        }
+
+        let mut coarse_y = (self.vram_address & 0x03e0) >> 5;
+
+        if coarse_y == 29 {
+            coarse_y = 0;
+            self.vram_address ^= 0x0800;
+        } else if coarse_y == 31 {
+            coarse_y = 0;
+        } else {
+            coarse_y += 1;
+        }
+
+        self.vram_address &= !0x03e0;
+        self.vram_address |= coarse_y << 5
+    }
+
+    pub fn io_read(&mut self, address: u16) -> u8 {
+        let address = address as usize;
+
+        if address == PPU_OAMDMA {
+            println!("PPU_READ: OAM_DMA");
+
+        } else {
+            let address = PPU_START + (address % 8);
+
+            match address {
+                PPU_CTRL => {
+                    println!("PPU_READ: PPU_CTRL");
+                },
+
+                PPU_MASK => {
+                    println!("PPU_READ: PPU_MASK");                    
+                },
+
+                PPU_STATUS => {
+                    println!("PPU_READ: PPU_STATUS");
+                    self.latch |= (self.vblank as u8) << 7;
+                    self.vblank = false;
+                    self.write_toggle = false;
+                },
+
+                PPU_OAMADDR => {
+                    println!("PPU_READ: PPU_OAMADDR");
+                },
+
+                PPU_OAMDATA => {
+                    println!("PPU_READ: PPU_OAMDATA");
+                },
+
+                PPU_SCROLL => {
+                    println!("PPU_READ: PPU_SCROLL");
+                },
+
+                PPU_ADDR => {
+                    println!("PPU_READ: PPU_ADDR");
+                },
+
+                PPU_DATA => {
+                    println!("PPU_READ: PPU_DATA");
+
+                    let vram_address = self.vram_address;
+
+                    if address >= 0x3f00 {
+                        self.latch = self.vram_read(vram_address);
+                        self.read_buffer = self.nametable_read(vram_address);
+                    } else {
+                        self.latch = self.read_buffer;
+                        self.read_buffer = self.vram_read(vram_address);
                     }
-                    PPU_ODD_SKIP_CYCLE => {
-                        if self.odd {
-                            self.cycle += 1;
-                            self.odd = false;
-                        } else {
-                            self.odd = true;
-                        }
+
+                    self.vram_address += self.vram_increment;
+                },
+
+                _ => unreachable!()
+            }
+        }
+
+        self.latch
+    }
+
+    pub fn io_write(&mut self, address: u16, value: u8) {
+        let address = address as usize;
+
+        self.latch = value;
+        
+        if address == PPU_OAMDMA {
+            println!("PPU_WRITE: OAM_DMA");
+
+        } else {
+            let address = PPU_START + (address % 8);
+
+            match address {
+                PPU_CTRL => {
+                    println!("PPU_WRITE: PPU_CTRL");
+                    self.nmi_enable = (self.latch & 0x80) != 0;
+
+                    if (self.latch & 0x10) != 0 {
+                        self.bg_pattern_table = 0x1000;
                     }
-                    _ => (),
+                    else {
+                        self.bg_pattern_table = 0;
+                    }
+
+                    if (self.latch & 0x04) != 0 {
+                        self.vram_increment = 32;   
+                    } else {
+                        self.vram_increment = 1;
+                    }
+
+                    self.temp_vram_address &= !0x0c00;
+                    self.temp_vram_address |= ((self.latch as u16) & 0x03) << 10;
+                },
+
+                PPU_MASK => {
+                    println!("PPU_WRITE: PPU_MASK");                    
+                },
+
+                PPU_STATUS => {
+                    println!("PPU_WRITE: PPU_STATUS");
+                },
+
+                PPU_OAMADDR => {
+                    println!("PPU_WRITE: PPU_OAMADDR");
+                },
+
+                PPU_OAMDATA => {
+                    println!("PPU_WRITE: PPU_OAMDATA");
+                },
+
+                PPU_SCROLL => {
+                    println!("PPU_WRITE: PPU_SCROLL");
+
+                    if self.write_toggle {
+                        self.temp_vram_address &= !0x73e0;
+                        self.temp_vram_address |= ((self.latch as u16) & 0xf8) << 2;
+                        self.temp_vram_address |= ((self.latch as u16) & 0x07) << 12;
+                    } else {
+                        self.temp_vram_address &= !0x001f;
+                        self.temp_vram_address |= (self.latch as u16) >> 3;
+                        self.fine_x_scroll = self.latch & 0x7;
+                    }
+
+                    self.write_toggle = !self.write_toggle;
+                },
+
+                PPU_ADDR => {
+                    println!("PPU_WRITE: PPU_ADDR");
+
+                    if self.write_toggle {
+                        self.temp_vram_address &= !0x00ff;
+                        self.temp_vram_address |= self.latch as u16;
+                        self.vram_address = self.temp_vram_address;
+                    } else {
+                        self.temp_vram_address &= !0x7f00;
+                        self.temp_vram_address |= ((self.latch as u16) & 0x3f) << 8;
+                    }
+
+                    self.write_toggle = !self.write_toggle;                   
+                },
+
+                PPU_DATA => {
+                    println!("PPU_WRITE: PPU_DATA");
+                    let vram_address = self.vram_address;
+                    let latch = self.latch;
+
+                    self.vram_write(vram_address, latch);
+                    self.vram_address += self.vram_increment;
+                },
+
+                _ => unreachable!()
+            }
+        } 
+    }
+
+    pub fn nametable_read(&mut self, address: u16) -> u8 {
+        let address = address as usize;
+
+        if address < 0x2400 {
+            return self.nametable_0[address - 0x2000]
+        }
+
+        if address < 0x2800 {
+            match self.mapper.mirroring() {
+                MirrorMode::Horizontal => return self.nametable_0[address - 0x2400],
+                MirrorMode::Vertical => return self.nametable_2[address - 0x2400],
+                MirrorMode::FourScreen => return self.nametable_1[address - 0x2400],
+            }
+        }
+
+        if address < 0x2c00 {
+            match self.mapper.mirroring() {
+                MirrorMode::Horizontal => return self.nametable_1[address - 0x2800],
+                MirrorMode::Vertical => return self.nametable_0[address - 0x2800],
+                MirrorMode::FourScreen => return self.nametable_2[address - 0x2800],
+            }
+        }
+
+        match self.mapper.mirroring() {
+            MirrorMode::Horizontal => self.nametable_2[address - 0x2c00],
+            MirrorMode::Vertical => self.nametable_1[address - 0x2c00],
+            MirrorMode::FourScreen => self.nametable_3[address - 0x2c00],
+        }
+    }
+
+    pub fn nametable_write(&mut self, address: u16, value: u8) {
+        let address = address as usize;
+
+        println!("{:x}", address);
+
+        if address < 0x2400 {
+            return self.nametable_0[address - 0x2000] = value;
+        }
+
+        if address < 0x2800 {
+            return match self.mapper.mirroring() {
+                MirrorMode::Horizontal => self.nametable_0[address - 0x2400] = value,
+                MirrorMode::Vertical => self.nametable_2[address - 0x2400] = value,
+                MirrorMode::FourScreen => self.nametable_1[address - 0x2400] = value,
+            };
+        }
+
+        if address < 0x2c00 {
+            return match self.mapper.mirroring() {
+                MirrorMode::Horizontal => self.nametable_1[address - 0x2800] = value,
+                MirrorMode::Vertical => self.nametable_0[address - 0x2800] = value,
+                MirrorMode::FourScreen => self.nametable_2[address - 0x2800] = value,
+            };
+        }
+
+        return match self.mapper.mirroring() {
+            MirrorMode::Horizontal => self.nametable_2[address - 0x2c00] = value,
+            MirrorMode::Vertical => self.nametable_1[address - 0x2c00] = value,
+            MirrorMode::FourScreen => self.nametable_3[address - 0x2c00] = value,
+        };
+    }
+
+    pub fn palette_read(&mut self, address: u16) -> u8 {
+        let mut address = address - 0x3f00;
+
+        if address == 0x10 || address == 0x14 || address == 0x18 || address == 0x1c {
+            address &= 0x0f;
+        }
+
+        self.palette[address as usize] % 0x40
+    }
+
+    pub fn palette_write(&mut self, address: u16, value: u8) {
+        let mut address = address - 0x3f00;
+
+        if address == 0x10 || address == 0x14 || address == 0x18 || address == 0x1c {
+            address &= 0x0f;
+        }
+
+        self.palette[address as usize] = value % 0x40;
+    }
+
+    pub fn should_nmi(&mut self) -> bool {
+        let nmi_status = self.nmi_enable & self.nmi;
+
+        if nmi_status {
+            self.nmi = false;
+        }
+
+        nmi_status
+    }
+
+    pub fn should_redraw(&mut self) -> bool {
+        let redraw = self.redraw;
+        self.redraw = false;
+        redraw
+    }
+
+    pub fn tick(&mut self) {
+        if self.scanline == 0 && self.cycle == 0 {
+            if self.odd {
+                self.cycle += 1;
+            }
+
+            self.odd = !self.odd;
+        }
+
+        if self.scanline == 241 && self.cycle == 1 {
+            self.vblank = true;
+            self.nmi = true;
+            self.redraw = true;
+        }
+
+        if self.scanline == 261 {
+            if self.cycle == 1 {
+                self.vblank = false;
+            }
+
+            else if self.cycle >= 280 && self.cycle <= 304 {
+                self.vram_address &= !0x7be0;
+                self.vram_address |= self.temp_vram_address & 0x7be0;
+            }
+        }
+
+        if self.scanline < 240 || self.scanline == 261 {
+            if self.scanline 
+
+            if self.cycle < 256 {
+                let fetch = self.cycle % 8;
+
+                if self.cycle != 0 && fetch == 0 {
+                    self.increment_x();
                 }
-            },
-            PPU_POSTRENDER_LINE => {
-                match self.cycle {
-                    PPU_STATUS_UPDATE_CYCLE => {
-                        self.status |= PPU_STATUS_VBLANK;
-                        self.nmi_occured = true;
-                        self.redraw = true;
-                    }
-                    _ => (),
+
+                else if fetch == 1 {
+                    self.pattern_shift_low &= 0x00ff;
+                    self.pattern_shift_low |= (self.tile_low as u16) << 8;
+
+                    self.pattern_shift_high &= 0x00ff;
+                    self.pattern_shift_high |= (self.tile_high as u16) << 8;
+
+                    let mut tile_address = 0x2000;
+                    tile_address |= self.vram_address & 0x0fff;
+
+                    self.tile = self.vram_read(tile_address);
                 }
-            },
-            _ => (),
+                    
+                else if fetch == 3 {
+                    let mut at_address = 0x23c0;
+                    at_address |= self.vram_address & 0x0c00;
+                    at_address |= (self.vram_address & 0x0380) >> 4;
+                    at_address |= (self.vram_address & 0x001c) >> 2;
+
+                    let mut attribute_byte = self.vram_read(at_address);
+
+                    if self.vram_address & 0x02 != 0 {
+                        attribute_byte >>= 2;
+                    }
+                    
+                    if self.vram_address & 0x40 != 0 {
+                        attribute_byte >>= 4;
+                    }
+
+                    self.attribute_latch_low = attribute_byte & 0x1;
+                    self.attribute_latch_high = (attribute_byte & 0x2) >> 1;
+                }
+
+                else if fetch == 5 {
+                    let tile_address = self.bg_pattern_table | (self.tile as u16 * 0x10);
+                    self.tile_low = self.vram_read(tile_address);
+                }
+
+                else if fetch == 7 {
+                    let tile_address = self.bg_pattern_table | (self.tile as u16 * 0x10) | 0x8;
+                    self.tile_high = self.vram_read(tile_address);
+                }
+            }
+                    
+            else if self.cycle == 256 {
+                self.increment_x();
+                self.increment_y();
+            }
+
+            else if self.cycle == 257 {
+                self.vram_address &= !0x041f;
+                self.vram_address |= self.temp_vram_address & 0x041f;
+            }
+
+            else if self.cycle == 328 || self.cycle == 336 {
+                self.increment_x();
+            }
+        }
+
+    if self.scanline < 240 && self.cycle != 0 && self.cycle < 257 {
+                let pattern_low = self.pattern_shift_low & (1 << self.fine_x_scroll) as u16;
+                let pattern_high = self.pattern_shift_high & (1 << self.fine_x_scroll) as u16;
+
+                let palette_index_low = pattern_low >> self.fine_x_scroll;
+                let palette_index_high = (pattern_high >> self.fine_x_scroll) << 1;
+
+                let palette_index = palette_index_high | palette_index_low;
+
+                self.pattern_shift_low >>= 1;
+                self.pattern_shift_high >>= 1;
+
+                let attribute_bit_low = self.attribute_shift_low & (1 << self.fine_x_scroll);
+                let attribute_bit_high = self.attribute_shift_high & (1 << self.fine_x_scroll);
+
+                let attribute_low = attribute_bit_low >> self.fine_x_scroll;
+                let attribute_high = (attribute_bit_high >> self.fine_x_scroll) << 1;
+
+                let palette = (attribute_high | attribute_low) as u16;
+
+                self.attribute_shift_low >>= 1;
+                self.attribute_shift_low |= self.attribute_latch_low << 7;
+
+                self.attribute_shift_high >>= 1;
+                self.attribute_shift_high |= self.attribute_latch_high << 7;
+
+                let colour_index = self.vram_read(0x3f00 + (palette * 4) + palette_index) as usize;
+                let framebuffer_address = (((self.scanline * 256) + self.cycle - 1) * 3) as usize;
+
+                self.framebuffer[framebuffer_address] = PALETTE[colour_index * 3];
+                self.framebuffer[framebuffer_address + 1] = PALETTE[(colour_index * 3) + 1];
+                self.framebuffer[framebuffer_address + 2] = PALETTE[(colour_index * 3) + 2];
         }
 
         self.cycle += 1;
+
         if self.cycle >= 341 {
             self.cycle = 0;
+            self.scanline += 1;
 
-            if self.line < 240 {
-                self.scanline();
-            }
-
-            self.line += 1;
-
-            if self.line >= 262 {
-                self.line = 0;
+            if self.scanline >= 262 {
+                self.scanline = 0;
             }
         }
     }
 
-    pub fn write(&mut self, address: usize, value: usize) {
-        let address = PPU_START + (address % 8);
-
-        self.latch = value as u8;
-
-        match address {
-            PPU_CTRL => {
-                println!("PPU_WRITE: PPU_CTRL");
-                self.controller = self.latch;
-            },
-            PPU_MASK => {
-                println!("PPU_WRITE: PPU_MASK");
-                self.mask = self.latch;
-            },
-            PPU_STATUS => {
-                println!("PPU_WRITE: PPU_STATUS");
-            },
-            PPU_OAMADDR => {
-                println!("PPU_WRITE: PPU_OAMADDR");
-                self.oam_address = self.latch;
-            },
-            PPU_OAMDATA => {
-                println!("PPU_WRITE: PPU_OAMDATA");
-                //self.oam_write(self.latch);
-            },
-            PPU_SCROLL => {
-                println!("PPU_WRITE: PPU_SCROLL");
-                if !self.toggle {
-                    self.scroll &= 0x00ff;
-                    self.scroll |= (self.latch as u16) << 8;
-                } else {
-                    self.scroll &= 0xff00;
-                    self.scroll |= self.latch as u16;
-                }
-                self.toggle = !self.toggle;
-            },
-            PPU_ADDR => {
-                println!("PPU_WRITE: PPU_ADDR");
-                if !self.toggle {
-                    self.address &= 0x00ff;
-                    self.address |= (self.latch as u16) << 8;
-                } else {
-                    self.address &= 0xff00;
-                    self.address |= self.latch as u16;
-                }
-                self.toggle = !self.toggle;
-            },
-            PPU_DATA => {
-                println!("PPU_WRITE: PPU_DATA");
-                let address = self.address as usize;
-                let latch = self.latch as usize;
-                self.write_vram(address, latch);
-
-                if (self.controller & PPU_CTRL_INCREMENT) != 0 {
-                    self.address = self.address.wrapping_add(32);
-                } else {
-                    self.address = self.address.wrapping_add(1);
-                }
-            },
-            PPU_OAMADDR => {
-                println!("PPU_WRITE: PPU_OAMADDR");
-                self.oamdma = true;
-            },
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn read_nametable(&mut self, address: usize) -> u8 {
-        if address < 0x400 {
-            return self.nametable_0[address];
-        }
-
-        if address < 0x800 {
-            match self.mapper.mirroring() {
-                MirrorMode::Horizontal => return self.nametable_0[address - 0x400],
-                MirrorMode::Vertical => return self.nametable_1[address - 0x400],
-                MirrorMode::FourScreen => return self.nametable_1[address - 0x400],
-            }
-        }
-
-        if address < 0xc00 {
-            match self.mapper.mirroring() {
-                MirrorMode::Horizontal => return self.nametable_2[address - 0x800],
-                MirrorMode::Vertical => return self.nametable_0[address - 0x800],
-                MirrorMode::FourScreen => return self.nametable_2[address - 0x800],
-            }
-        }
-
-        match self.mapper.mirroring() {
-            MirrorMode::Horizontal => return self.nametable_2[address - 0xc00],
-            MirrorMode::Vertical => return self.nametable_1[address - 0xc00],
-            MirrorMode::FourScreen => return self.nametable_3[address - 0xc00],
-        }
-    }
-
-    pub fn write_nametable(&mut self, address: usize, value: u8) {
-        if address < 0x400 {
-            self.nametable_0[address] = value;
-            return;
-        }
-
-        if address < 0x800 {
-            match self.mapper.mirroring() {
-                MirrorMode::Horizontal => self.nametable_0[address - 0x400] = value,
-                MirrorMode::Vertical => self.nametable_1[address - 0x400] = value,
-                MirrorMode::FourScreen => self.nametable_1[address - 0x400] = value,
-            }
-            return;
-        }
-
-        if address < 0xc00 {
-            match self.mapper.mirroring() {
-                MirrorMode::Horizontal => self.nametable_2[address - 0x800] = value,
-                MirrorMode::Vertical => self.nametable_0[address - 0x800] = value,
-                MirrorMode::FourScreen => self.nametable_2[address - 0x800] = value,
-            }
-            return;
-        }
-
-        match self.mapper.mirroring() {
-            MirrorMode::Horizontal => self.nametable_2[address - 0xc00] = value,
-            MirrorMode::Vertical => self.nametable_1[address - 0xc00] = value,
-            MirrorMode::FourScreen => self.nametable_3[address - 0xc00] = value,
-        }
-        return;
-    }
-
-    pub fn read_palette(&mut self, address: usize) -> u8 {
-        let mut address = address;
-
-        if address == 0x10 || address == 0x14 || address == 0x18 || address == 0x1c {
-            address &= 0x0f;
-        }
-
-        self.palette[address]
-    }
-
-    pub fn write_palette(&mut self, address: usize, value: u8) {
-        let mut address = address;
-
-        if address == 0x10 || address == 0x14 || address == 0x18 || address == 0x1c {
-            address &= 0x0f;
-        }
-
-        self.palette[address] = value;
-    }
-
-    pub fn read_vram(&mut self, address: usize) -> u8 {
+    pub fn vram_read(&mut self, address: u16) -> u8 {
         let address = address % 0x4000;
 
         if address < 0x2000 {
-            return self.mapper.read_chr(address);
+            return self.mapper.read_chr(address)
         }
 
         if address < 0x3f00 {
-            return self.read_nametable((address - 0x2000) % 0x1000);
+            return self.nametable_read(0x2000 + (address % 0x1000))
         }
 
-        if address < 0x4000 {
-            return self.read_palette((address - 0x3f00) % 0x20);
+        if address < 0x3fff {
+            return self.palette_read(0x3f00 + (address % 0x20))
         }
 
-        unreachable!()
+        panic!("PPU_READ_ERROR: unknown address 0x{:04x}", address);
     }
 
-    pub fn write_vram(&mut self, address: usize, value: usize) {
+    pub fn vram_write(&mut self, address: u16, value: u8) {
         let address = address % 0x4000;
 
         if address < 0x2000 {
@@ -604,13 +606,13 @@ impl Ricoh2C02 {
         }
 
         if address < 0x3f00 {
-            return self.write_nametable((address - 0x2000) % 0x1000, value as u8);
+            return self.nametable_write(0x2000 + (address % 0x1000), value);
         }
 
-        if address < 0x4000 {
-            return self.write_palette((address - 0x3f00) % 0x20, value as u8);
+        if address < 0x3fff {
+            return self.palette_write(0x3f00 + (address % 0x20), value);
         }
 
-        unreachable!()
+        panic!("PPU_WRITE_ERROR: unknown address 0x{:04x}", address)
     }
 }

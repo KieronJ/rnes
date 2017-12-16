@@ -52,16 +52,15 @@ fn main() {
 
 		if cpu.should_nmi() {
 			cpu.interrupt(InterruptType::NMI);
-			cpu.clear_nmi();
 		}
 
-		//if cpu.should_irq() {
-		//	cpu.interrupt(InterruptType::IRQ);
-		//}
+		if cpu.should_irq() {
+			cpu.interrupt(InterruptType::IRQ);
+		}
 
 		cpu.step();
 
-		if cpu.redraw() {
+		if cpu.should_redraw() {
 			sdl_canvas.clear();
 			cpu.draw_screen(&mut sdl_texture);
 			sdl_canvas.copy(&sdl_texture, None, Some(Rect::new(0, 0, 256, 240))).unwrap();

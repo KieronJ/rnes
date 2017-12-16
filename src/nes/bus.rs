@@ -20,23 +20,17 @@ impl Bus {
         }
     }
 
-    pub fn clear_nmi(&mut self) {
-        self.ppu.clear_nmi();
-    }
-
     pub fn draw_screen(&self, texture: &mut sdl2::render::Texture) {
         self.ppu.draw_screen(texture);
     }
 
     pub fn read(&mut self, address: u16) -> u8 {
-        let address = address as usize;
-
         if address < 0x2000 {
-            return self.ram[address % RAM_SIZE];
+            return self.ram[address as usize % RAM_SIZE];
         }
 
         if self.ppu.in_range(address) {
-            return self.ppu.read(address);
+            return self.ppu.io_read(address);
         }
 
         if self.mapper.in_range(address) {
@@ -50,37 +44,33 @@ impl Bus {
         panic!("read from unknown memory region 0x{:04x}", address)
     }
 
-	pub fn redraw(&mut self) -> bool {
-		self.ppu.redraw()
-	}
+    pub fn should_redraw(&mut self) -> bool {
+        self.ppu.should_redraw()
+    }
 
-	pub fn should_nmi(&self) -> bool {
-		self.ppu.should_nmi()
-	}
+    pub fn should_nmi(&mut self) -> bool {
+        self.ppu.should_nmi()
+    }
 
-	pub fn tick(&mut self) {
-		self.ppu.step();
-	}
+    pub fn tick(&mut self) {
+        self.ppu.tick();
+        self.ppu.tick();
+        self.ppu.tick();
+    }
 
     pub fn write(&mut self, address: u16, value: u8) {
-        let address = address as usize;
-
         if address < 0x2000 {
-            return self.ram[address % RAM_SIZE] = value;
+            return self.ram[address as usize % RAM_SIZE] = value;
         }
 
         if self.ppu.in_range(address) {
-            return self.ppu.write(address, value as usize);
+            return self.ppu.io_write(address, value);
         }
 
         if self.mapper.in_range(address) {
-            return self.mapper.write_prg(address, value as usize);
+            return self.mapper.write_prg(address, value);
         }
 
-        if (address >= 0x4000) && (address <= 0x4020) {
-            return;
-        }
-
-        panic!("write to unknown memory region 0x{:04x}", address)
+        println!("write to unknown memory region 0x{:04x}", address)
     }
 }

@@ -3,10 +3,6 @@ extern crate sdl2;
 use nes::ricoh2a03::Ricoh2A03;
 
 impl Ricoh2A03 {
-	pub fn clear_nmi(&mut self) {
-		self.bus.clear_nmi();
-	}
-
 	pub fn cross(&self, a: u16, b: u16) -> bool {
 		(a.wrapping_add(b)) & 0xff00 != a & 0xff00
 	}
@@ -52,8 +48,8 @@ impl Ricoh2A03 {
 		self.read16_d(address, address + 1)
     }
 
-	pub fn redraw(&mut self) -> bool {
-		self.bus.redraw()
+	pub fn should_redraw(&mut self) -> bool {
+		self.bus.should_redraw()
 	}
 
 	pub fn set_nz(&mut self, value: u8) {
@@ -61,7 +57,11 @@ impl Ricoh2A03 {
 		self.p.zero = value == 0;
 	}
 
-	pub fn should_nmi(&self) -> bool {
+	pub fn should_irq(&mut self) -> bool {
+		false
+	}
+
+	pub fn should_nmi(&mut self) -> bool {
 		self.bus.should_nmi()
 	}
 
