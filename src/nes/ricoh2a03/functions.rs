@@ -7,9 +7,17 @@ impl Ricoh2A03 {
 		(a.wrapping_add(b)) & 0xff00 != a & 0xff00
 	}
 
+    //pub fn draw_nametables(&mut self, texture: &mut sdl2::render::Texture) {
+    //    self.bus.draw_nametables(texture);
+    //}
+
     pub fn draw_screen(&self, texture: &mut sdl2::render::Texture) {
         self.bus.draw_screen(texture);
     }
+
+    //pub fn draw_tiles(&mut self, texture: &mut sdl2::render::Texture) {
+    //    self.bus.draw_tiles(texture);
+    //}
 
 	pub fn pop8(&mut self) -> u8 {
 		self.s = self.s.wrapping_add(1);

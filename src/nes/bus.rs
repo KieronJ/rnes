@@ -20,6 +20,14 @@ impl Bus {
         }
     }
 
+    //pub fn draw_nametables(&mut self, texture: &mut sdl2::render::Texture) {
+    //    self.ppu.draw_nametables(texture);
+    //}
+
+    //pub fn draw_tiles(&mut self, texture: &mut sdl2::render::Texture) {
+    //    self.ppu.draw_tiles(texture);
+    //}
+
     pub fn draw_screen(&self, texture: &mut sdl2::render::Texture) {
         self.ppu.draw_screen(texture);
     }

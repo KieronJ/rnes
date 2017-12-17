@@ -68,7 +68,13 @@ macro_rules! branch {
 		
 		if $flag == $condition {
 			$cpu.tick();
-			$cpu.pc = $cpu.pc.wrapping_add(jump);
+			let new_pc = $cpu.pc.wrapping_add(jump);
+
+			if ($cpu.pc & 0xff00) != (new_pc & 0xff00) {
+				$cpu.tick();
+			}
+
+			$cpu.pc = new_pc;
 		}
 	};
 }

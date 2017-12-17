@@ -29,11 +29,24 @@ fn main() {
 	let sdl_context = sdl2::init().unwrap();
 	let mut sdl_event = sdl_context.event_pump().unwrap();
 	let sdl_video = sdl_context.video().unwrap();
+
 	let sdl_window = sdl_video.window("rnes", 256, 240).build().unwrap();
 	let mut sdl_canvas = sdl_window.into_canvas().build().unwrap();
 	let sdl_texture_creator = sdl_canvas.texture_creator();
 	let mut sdl_texture = sdl_texture_creator.create_texture_streaming(
 							PixelFormatEnum::RGB24, 256, 240).unwrap();
+
+	//let nt_window = sdl_video.window("rnes nametables", 512, 480).build().unwrap();
+	//let mut nt_canvas = nt_window.into_canvas().build().unwrap();
+	//let nt_texture_creator = nt_canvas.texture_creator();
+	//let mut nt_texture = nt_texture_creator.create_texture_streaming(
+	//						PixelFormatEnum::RGB24, 512, 480).unwrap();
+
+	//let tile_window = sdl_video.window("rnes tiles", 256, 128).build().unwrap();
+	//let mut tile_canvas = tile_window.into_canvas().build().unwrap();
+	//let tile_texture_creator = tile_canvas.texture_creator();
+	//let mut tile_texture = tile_texture_creator.create_texture_streaming(
+	//						PixelFormatEnum::RGB24, 512, 480).unwrap();
 
 	let mut running = true;
 
@@ -65,6 +78,11 @@ fn main() {
 			cpu.draw_screen(&mut sdl_texture);
 			sdl_canvas.copy(&sdl_texture, None, Some(Rect::new(0, 0, 256, 240))).unwrap();
 			sdl_canvas.present();
+
+			//nt_canvas.clear();
+			//cpu.draw_nametables(&mut nt_texture);
+			//nt_canvas.copy(&nt_texture, None, Some(Rect::new(0, 0, 512, 480))).unwrap();
+			//nt_canvas.present();
 		}
 	}
 }
