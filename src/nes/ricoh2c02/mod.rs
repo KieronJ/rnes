@@ -3,18 +3,17 @@ extern crate sdl2;
 use nes::mapper::Mapper;
 use nes::rom::MirrorMode;
 
-pub const PPU_START: usize = 0x2000;
-pub const PPU_END: usize = 0x3fff;
+pub const PPU_START: u16 = 0x2000;
+pub const PPU_END: u16 = 0x3fff;
 
-pub const PPU_CTRL: usize = 0x2000;
-pub const PPU_MASK: usize = 0x2001;
-pub const PPU_STATUS: usize = 0x2002;
-pub const PPU_OAMADDR: usize = 0x2003;
-pub const PPU_OAMDATA: usize = 0x2004;
-pub const PPU_SCROLL: usize = 0x2005;
-pub const PPU_ADDR: usize = 0x2006;
-pub const PPU_DATA: usize = 0x2007;
-pub const PPU_OAMDMA: usize = 0x4014;
+pub const PPU_CTRL: u16 = 0x2000;
+pub const PPU_MASK: u16 = 0x2001;
+pub const PPU_STATUS: u16 = 0x2002;
+pub const PPU_OAMADDR: u16 = 0x2003;
+pub const PPU_OAMDATA: u16 = 0x2004;
+pub const PPU_SCROLL: u16 = 0x2005;
+pub const PPU_ADDR: u16 = 0x2006;
+pub const PPU_DATA: u16 = 0x2007;
 
 static PALETTE: [u8; 192] = [
     84, 84, 84,         0, 30, 116,         8, 16, 144,         48, 0, 136,         68, 0, 100,         92, 0, 48,          84, 4, 0,       60, 24, 0,
@@ -55,7 +54,8 @@ pub struct Ricoh2C02 {
 
     vblank: bool,
 
-    nmi: bool,
+    should_nmi: bool,
+
     redraw: bool,
 
     vram_address: u16,
@@ -108,7 +108,8 @@ impl Ricoh2C02 {
 
             vblank: false,
 
-            nmi: false,
+            should_nmi: false,
+
             redraw: false,
 
             vram_address: 0,
@@ -248,10 +249,7 @@ impl Ricoh2C02 {
     }
 
     pub fn in_range(&self, address: u16) -> bool {
-        let address = address as usize;
-
-        if (address >= PPU_START) && (address <= PPU_END) ||
-            address == PPU_OAMDMA {
+        if (address >= PPU_START) && (address <= PPU_END) {
             return true;
         }
 
@@ -292,257 +290,253 @@ impl Ricoh2C02 {
     }
 
     pub fn io_read(&mut self, address: u16) -> u8 {
-        let address = address as usize;
+        match address {
+            PPU_CTRL => {
+                //println!("PPU_CTRL");
+            },
 
-        if address == PPU_OAMDMA {
-            println!("PPU_READ: OAM_DMA");
+            PPU_MASK => {
+                //println!("PPU_MASK");                    
+            },
 
-        } else {
-            let address = PPU_START + (address % 8);
+            PPU_STATUS => {
+                self.latch &= 0x1f;
+                self.latch |= (self.vblank as u8) << 7;
 
-            match address {
-                PPU_CTRL => {
-                    println!("PPU_READ: PPU_CTRL");
-                },
+                self.vblank = false;
+                self.write_toggle = false;
 
-                PPU_MASK => {
-                    println!("PPU_READ: PPU_MASK");                    
-                },
+                //println!("PPU_STATUS -> 0x{:02x}", self.latch);
+            },
 
-                PPU_STATUS => {
-                    println!("PPU_READ: PPU_STATUS");
-                    self.latch &= 0x1f;
-                    self.latch |= (self.vblank as u8) << 7;
-                    self.vblank = false;
-                    self.write_toggle = false;
-                },
+            PPU_OAMADDR => {
+                //println!("PPU_OAMADDR");
+            },
 
-                PPU_OAMADDR => {
-                    println!("PPU_READ: PPU_OAMADDR");
-                },
+            PPU_OAMDATA => {
+                //println!("PPU_OAMDATA");
+            },
 
-                PPU_OAMDATA => {
-                    println!("PPU_READ: PPU_OAMDATA");
-                },
+            PPU_SCROLL => {
+                //println!("PPU_SCROLL");
+            },
 
-                PPU_SCROLL => {
-                    println!("PPU_READ: PPU_SCROLL");
-                },
+            PPU_ADDR => {
+                //println!("PPU_ADDR");
+            },
 
-                PPU_ADDR => {
-                    println!("PPU_READ: PPU_ADDR");
-                },
+            PPU_DATA => {
+                let vram_address = self.vram_address;
 
-                PPU_DATA => {
-                    println!("PPU_READ: PPU_DATA");
+                self.latch = self.read_buffer;
+                self.read_buffer = self.vram_read(vram_address);
 
-                    let vram_address = self.vram_address;
+                if (vram_address & 0x3fff) >= 0x3f00 {
+                    self.latch = self.vram_read(vram_address);
+                }
 
-                    if vram_address >= 0x3f00 {
-                        self.latch = self.vram_read(vram_address);
-                        self.read_buffer = self.nametable_read(vram_address);
-                    } else {
-                        self.latch = self.read_buffer;
-                        self.read_buffer = self.vram_read(vram_address);
-                    }
+                if self.rendering_enabled() && (self.scanline < 240 || self.scanline == 261) {
+                    self.increment_x();
+                    self.increment_y();
+                } else {
+                    self.vram_address += self.vram_increment;
+                }
 
-                    if self.rendering_enabled() && (self.scanline < 240 || self.scanline == 261) {
-                        self.increment_x();
-                        self.increment_y();
-                    } else {
-                        self.vram_address += self.vram_increment;
-                    }
-                },
-
-                _ => unreachable!()
-            }
+                //println!("PPU_DATA -> 0x{:02x}", self.latch);
+            },
+            _ => unreachable!()
         }
 
         self.latch
     }
 
     pub fn io_write(&mut self, address: u16, value: u8) {
-        let address = address as usize;
-
         self.latch = value;
-        
-        if address == PPU_OAMDMA {
-            println!("PPU_WRITE: OAM_DMA");
 
-        } else {
-            let address = PPU_START + (address % 8);
+        match address {
+            PPU_CTRL => {
+                let previous_nmi = self.nmi_enable;
+                self.nmi_enable = (self.latch & 0x80) != 0;
 
-            match address {
-                PPU_CTRL => {
-                    println!("PPU_WRITE: PPU_CTRL");
-                    self.nmi_enable = (self.latch & 0x80) != 0;
+                if !previous_nmi && self.nmi_enable
+                    && self.vblank
+                    && (self.scanline != 261 || self.cycle != 0) {
+                    self.should_nmi = true;
+                }
 
-                    if (self.latch & 0x10) != 0 {
-                        self.bg_pattern_table = 0x1000;
-                    }
-                    else {
-                        self.bg_pattern_table = 0;
-                    }
+                if self.scanline == 241 && self.cycle <= 3
+                    && !self.nmi_enable {
+                    self.should_nmi = false;
+                }
 
-                    if (self.latch & 0x04) != 0 {
-                        self.vram_increment = 32;   
-                    } else {
-                        self.vram_increment = 1;
-                    }
+                if (self.latch & 0x10) != 0 {
+                    self.bg_pattern_table = 0x1000;
+                }
+                else {
+                    self.bg_pattern_table = 0;
+                }
 
-                    self.temp_vram_address &= !0x0c00;
-                    self.temp_vram_address |= ((self.latch as u16) & 0x03) << 10;
-                },
+                if (self.latch & 0x04) != 0 {
+                    self.vram_increment = 32;   
+                } else {
+                    self.vram_increment = 1;
+                }
 
-                PPU_MASK => {
-                    println!("PPU_WRITE: PPU_MASK"); 
-                    self.sprite_enable = (self.latch & 0x10) != 0;
-                    self.background_enable = (self.latch & 0x08) != 0;                     
-                },
+                self.temp_vram_address &= !0x0c00;
+                self.temp_vram_address |= ((self.latch as u16) & 0x03) << 10;
 
-                PPU_STATUS => {
-                    println!("PPU_WRITE: PPU_STATUS");
-                },
+                //println!("0x{:02x} -> PPU_CTRL", self.latch);
+            },
 
-                PPU_OAMADDR => {
-                    println!("PPU_WRITE: PPU_OAMADDR");
-                },
+            PPU_MASK => {
+                self.sprite_enable = (self.latch & 0x10) != 0;
+                self.background_enable = (self.latch & 0x08) != 0;
 
-                PPU_OAMDATA => {
-                    println!("PPU_WRITE: PPU_OAMDATA");
-                },
+                //println!("0x{:02x} -> PPU_MASK", self.latch);
+            },
 
-                PPU_SCROLL => {
-                    println!("PPU_WRITE: PPU_SCROLL");
+            PPU_STATUS => {
+                //println!("PPU_STATUS");
+            },
 
-                    if self.write_toggle {
-                        self.temp_vram_address &= !0x73e0;
-                        self.temp_vram_address |= ((self.latch as u16) & 0xf8) << 2;
-                        self.temp_vram_address |= ((self.latch as u16) & 0x07) << 12;
-                    } else {
-                        self.temp_vram_address &= !0x001f;
-                        self.temp_vram_address |= (self.latch as u16) >> 3;
-                        self.fine_x_scroll = self.latch & 0x7;
-                    }
+            PPU_OAMADDR => {
+                //println!("PPU_OAMADDR");
+            },
 
-                    self.write_toggle = !self.write_toggle;
-                },
+            PPU_OAMDATA => {
+                //println!("PPU_OAMDATA");
+            },
 
-                PPU_ADDR => {
-                    println!("PPU_WRITE: PPU_ADDR");
+            PPU_SCROLL => {
+                if self.write_toggle {
+                    self.temp_vram_address &= !0x73e0;
+                    self.temp_vram_address |= ((self.latch as u16) & 0xf8) << 2;
+                    self.temp_vram_address |= ((self.latch as u16) & 0x07) << 12;
+                } else {
+                    self.temp_vram_address &= !0x001f;
+                    self.temp_vram_address |= (self.latch as u16) >> 3;
+                    self.fine_x_scroll = self.latch & 0x7;
+                }
 
-                    if self.write_toggle {
-                        self.temp_vram_address &= !0x00ff;
-                        self.temp_vram_address |= self.latch as u16;
-                        self.vram_address = self.temp_vram_address;
-                    } else {
-                        self.temp_vram_address &= !0x7f00;
-                        self.temp_vram_address |= ((self.latch as u16) & 0x3f) << 8;
-                    }
+                self.write_toggle = !self.write_toggle;
 
-                    self.write_toggle = !self.write_toggle;                   
-                },
+                //println!("0x{:02x} -> PPU_SCROLL", self.latch);
+            },
 
-                PPU_DATA => {
-                    println!("PPU_WRITE: PPU_DATA");
-                    let vram_address = self.vram_address;
-                    let latch = self.latch;
+            PPU_ADDR => {
+                if self.write_toggle {
+                    self.temp_vram_address &= !0x00ff;
+                    self.temp_vram_address |= self.latch as u16;
+                    self.vram_address = self.temp_vram_address;
+                } else {
+                    self.temp_vram_address &= !0xff00;
+                    self.temp_vram_address |= ((self.latch as u16) & 0x3f) << 8;
+                }
 
-                    self.vram_write(vram_address, latch);
+                self.write_toggle = !self.write_toggle;
 
-                    if self.rendering_enabled() && (self.scanline < 240 || self.scanline == 261) {
-                        self.increment_x();
-                        self.increment_y();
-                    } else {
-                        self.vram_address += self.vram_increment;
-                    }
-                },
+                //println!("0x{:02x} -> PPU_ADDR", self.latch);            
+            },
 
-                _ => unreachable!()
-            }
-        } 
+            PPU_DATA => {
+                let vram_address = self.vram_address;
+                let latch = self.latch;
+
+                self.vram_write(vram_address, latch);
+
+                if self.rendering_enabled() && (self.scanline < 240 || self.scanline == 261) {
+                    self.increment_x();
+                    self.increment_y();
+                } else {
+                    self.vram_address += self.vram_increment;
+                }
+
+                //println!("0x{:02x} -> PPU_DATA", self.latch);   
+            },
+
+            _ => unreachable!()
+        }
     }
 
     pub fn nametable_read(&mut self, address: u16) -> u8 {
-        let address = address as usize;
+        let address = (address & 0xfff) as usize;
 
-        if address < 0x2400 {
-            return self.nametable_0[address - 0x2000]
+        if address < 0x400 {
+            return self.nametable_0[address]
         }
 
-        if address < 0x2800 {
+        if address < 0x800 {
             match self.mapper.mirroring() {
-                MirrorMode::Horizontal => return self.nametable_0[address - 0x2400],
-                MirrorMode::Vertical => return self.nametable_1[address - 0x2400],
-                MirrorMode::FourScreen => return self.nametable_1[address - 0x2400],
+                MirrorMode::Horizontal => return self.nametable_0[address - 0x400],
+                MirrorMode::Vertical => return self.nametable_1[address - 0x400],
+                MirrorMode::FourScreen => return self.nametable_1[address - 0x400],
             }
         }
 
-        if address < 0x2c00 {
+        if address < 0xc00 {
             match self.mapper.mirroring() {
-                MirrorMode::Horizontal => return self.nametable_2[address - 0x2800],
-                MirrorMode::Vertical => return self.nametable_0[address - 0x2800],
-                MirrorMode::FourScreen => return self.nametable_2[address - 0x2800],
+                MirrorMode::Horizontal => return self.nametable_2[address - 0x800],
+                MirrorMode::Vertical => return self.nametable_0[address - 0x800],
+                MirrorMode::FourScreen => return self.nametable_2[address - 0x800],
             }
         }
 
         match self.mapper.mirroring() {
-            MirrorMode::Horizontal => self.nametable_2[address - 0x2c00],
-            MirrorMode::Vertical => self.nametable_1[address - 0x2c00],
-            MirrorMode::FourScreen => self.nametable_3[address - 0x2c00],
+            MirrorMode::Horizontal => self.nametable_2[address - 0xc00],
+            MirrorMode::Vertical => self.nametable_1[address - 0xc00],
+            MirrorMode::FourScreen => self.nametable_3[address - 0xc00],
         }
     }
 
     pub fn nametable_write(&mut self, address: u16, value: u8) {
-        let address = address as usize;
+        let address = (address & 0xfff) as usize;
 
-        println!("{:x}", address);
-
-        if address < 0x2400 {
-            return self.nametable_0[address - 0x2000] = value;
+        if address < 0x400 {
+            return self.nametable_0[address] = value;
         }
 
-        if address < 0x2800 {
+        if address < 0x800 {
             return match self.mapper.mirroring() {
-                MirrorMode::Horizontal => self.nametable_0[address - 0x2400] = value,
-                MirrorMode::Vertical => self.nametable_1[address - 0x2400] = value,
-                MirrorMode::FourScreen => self.nametable_1[address - 0x2400] = value,
+                MirrorMode::Horizontal => self.nametable_0[address - 0x400] = value,
+                MirrorMode::Vertical => self.nametable_1[address - 0x400] = value,
+                MirrorMode::FourScreen => self.nametable_1[address - 0x400] = value,
             };
         }
 
-        if address < 0x2c00 {
+        if address < 0xc00 {
             return match self.mapper.mirroring() {
-                MirrorMode::Horizontal => self.nametable_2[address - 0x2800] = value,
-                MirrorMode::Vertical => self.nametable_0[address - 0x2800] = value,
-                MirrorMode::FourScreen => self.nametable_2[address - 0x2800] = value,
+                MirrorMode::Horizontal => self.nametable_2[address - 0x800] = value,
+                MirrorMode::Vertical => self.nametable_0[address - 0x800] = value,
+                MirrorMode::FourScreen => self.nametable_2[address - 0x800] = value,
             };
         }
 
         return match self.mapper.mirroring() {
-            MirrorMode::Horizontal => self.nametable_2[address - 0x2c00] = value,
-            MirrorMode::Vertical => self.nametable_1[address - 0x2c00] = value,
-            MirrorMode::FourScreen => self.nametable_3[address - 0x2c00] = value,
+            MirrorMode::Horizontal => self.nametable_2[address - 0xc00] = value,
+            MirrorMode::Vertical => self.nametable_1[address - 0xc00] = value,
+            MirrorMode::FourScreen => self.nametable_3[address - 0xc00] = value,
         };
     }
 
     pub fn palette_read(&mut self, address: u16) -> u8 {
-        let mut address = address - 0x3f00;
+        let mut address = (address & 0x1f) as usize;
 
         if address == 0x10 || address == 0x14 || address == 0x18 || address == 0x1c {
             address &= 0x0f;
         }
 
-        self.palette[address as usize] % 0x40
+        self.palette[address]
     }
 
     pub fn palette_write(&mut self, address: u16, value: u8) {
-        let mut address = address - 0x3f00;
+        let mut address = (address & 0x1f) as usize;
+        let value = value & 0x3f;
 
         if address == 0x10 || address == 0x14 || address == 0x18 || address == 0x1c {
             address &= 0x0f;
         }
 
-        self.palette[address as usize] = value % 0x40;
+        self.palette[address] = value;
     }
 
     pub fn rendering_enabled(&self) -> bool {
@@ -550,13 +544,12 @@ impl Ricoh2C02 {
     }
 
     pub fn should_nmi(&mut self) -> bool {
-        let nmi_status = self.nmi_enable && self.nmi;
-
-        if nmi_status {
-            self.nmi = false;
+        if self.should_nmi {
+            self.should_nmi = false;
+            return true;
         }
 
-        nmi_status
+        false
     }
 
     pub fn should_redraw(&mut self) -> bool {
@@ -576,8 +569,11 @@ impl Ricoh2C02 {
 
         if self.scanline == 241 && self.cycle == 1 {
             self.vblank = true;
-            self.nmi = true;
             self.redraw = true;
+
+            if self.nmi_enable {
+                self.should_nmi = true;
+            }
         }
 
         if self.scanline == 261 {
@@ -668,7 +664,7 @@ impl Ricoh2C02 {
             }
         }
 
-    if self.scanline < 240 && self.cycle != 0 && self.cycle < 257 {
+    if self.scanline < 240 && self.cycle != 0 && self.cycle < 257 && self.rendering_enabled() {
         let pattern_low = self.pattern_shift_low & (0x80 >> self.fine_x_scroll) as u16;
         let pattern_high = self.pattern_shift_high & (0x80 >> self.fine_x_scroll) as u16;
 
@@ -716,38 +712,30 @@ impl Ricoh2C02 {
     }
 
     pub fn vram_read(&mut self, address: u16) -> u8 {
-        let address = address % 0x4000;
+        let address = address & 0x3fff;
 
         if address < 0x2000 {
             return self.mapper.read_chr(address)
         }
 
         if address < 0x3f00 {
-            return self.nametable_read(0x2000 + (address % 0x1000))
+            return self.nametable_read(address)
         }
 
-        if address < 0x4000 {
-            return self.palette_read(0x3f00 + (address % 0x20))
+        return self.palette_read(address)
         }
-
-        panic!("PPU_READ_ERROR: unknown address 0x{:04x}", address);
-    }
 
     pub fn vram_write(&mut self, address: u16, value: u8) {
-        let address = address % 0x4000;
+        let address = address & 0x3fff;
 
         if address < 0x2000 {
             return self.mapper.write_chr(address, value);
         }
 
         if address < 0x3f00 {
-            return self.nametable_write(0x2000 + (address % 0x1000), value);
+            return self.nametable_write(address, value);
         }
 
-        if address < 0x4000 {
-            return self.palette_write(0x3f00 + (address % 0x20), value);
-        }
-
-        panic!("PPU_WRITE_ERROR: unknown address 0x{:04x}", address)
+        return self.palette_write(address, value);
     }
 }

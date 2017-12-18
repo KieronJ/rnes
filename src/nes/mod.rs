@@ -1,4 +1,5 @@
 pub mod bus;
+pub mod controller;
 pub mod mapper;
 pub mod mappers;
 pub mod ricoh2a03;

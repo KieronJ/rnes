@@ -42,8 +42,8 @@ impl Mapper for Nrom {
         }
     }
 
-    fn write_chr(&self, _: u16, _: u8) {
-        println!("unsupported write to CHR")
+    fn write_chr(&self, address: u16, _: u8) {
+        println!("unsupported write to CHR 0x{:04x}", address)
     }
 
     fn write_prg(&self, _: u16, _: u8) {

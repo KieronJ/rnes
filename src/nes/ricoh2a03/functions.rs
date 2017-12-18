@@ -1,6 +1,7 @@
 extern crate sdl2;
 
 use nes::ricoh2a03::Ricoh2A03;
+use sdl2::keyboard::*;
 
 impl Ricoh2A03 {
 	pub fn cross(&self, a: u16, b: u16) -> bool {
@@ -59,6 +60,10 @@ impl Ricoh2A03 {
 	pub fn should_redraw(&mut self) -> bool {
 		self.bus.should_redraw()
 	}
+
+    pub fn set_button(&mut self, keycode: Keycode, state: bool) {
+        self.bus.set_button(keycode, state);
+    }
 
 	pub fn set_nz(&mut self, value: u8) {
 		self.p.negative = (value & 0x80) != 0;

@@ -1,22 +1,26 @@
 extern crate sdl2;
 
+use nes::controller::Controller;
 use nes::mapper::Mapper;
 use nes::ricoh2c02::Ricoh2C02;
+use sdl2::keyboard::*;
 
 pub const RAM_SIZE: usize = 0x800;
 
 pub struct Bus {
-    ram: Box<[u8]>,
+    controller: Controller,
     mapper: Box<Mapper+Send>,
     ppu: Ricoh2C02,
+    ram: Box<[u8]>,
 }
 
 impl Bus {
     pub fn new(mapper: Box<Mapper+Send>, ppu: Ricoh2C02) -> Bus {
         Bus {
-            ram: vec![0; RAM_SIZE].into_boxed_slice(),
+            controller: Controller::new(),
             mapper: mapper,
             ppu: ppu,
+            ram: vec![0; RAM_SIZE].into_boxed_slice(),
         }
     }
 
@@ -38,18 +42,26 @@ impl Bus {
         }
 
         if self.ppu.in_range(address) {
-            return self.ppu.io_read(address);
+            return self.ppu.io_read(0x2000 + (address % 8));
+        }
+
+        if self.controller.in_range(address) {
+            self.controller.io_read();
         }
 
         if self.mapper.in_range(address) {
             return self.mapper.read_prg(address);
         }
 
-        if (address >= 0x4000) && (address <= 0x4020) {
+        if address >= 0x4000 && address <= 0x4020 {
             return 0;
         }
 
         panic!("read from unknown memory region 0x{:04x}", address)
+    }
+
+    pub fn set_button(&mut self, keycode: Keycode, state: bool) {
+        self.controller.set_button(keycode, state);
     }
 
     pub fn should_redraw(&mut self) -> bool {
@@ -72,13 +84,21 @@ impl Bus {
         }
 
         if self.ppu.in_range(address) {
-            return self.ppu.io_write(address, value);
+            return self.ppu.io_write(0x2000 + (address % 8), value);
         }
 
         if self.mapper.in_range(address) {
             return self.mapper.write_prg(address, value);
         }
 
-        println!("write to unknown memory region 0x{:04x}", address)
+        if self.controller.in_range(address) {
+            self.controller.io_write(value);
+        }
+
+        if address >= 0x4000 && address <= 0x4020 {
+            return;
+        }
+
+        panic!("write to unknown memory region 0x{:04x}", address)
     }
 }

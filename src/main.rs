@@ -56,9 +56,19 @@ fn main() {
 				Event::Quit {..} => {
 					running = false;
 				},
+
 				Event::KeyDown {keycode: Some(Keycode::Escape), ..} => {
 					running = false;
 				},
+
+				Event::KeyDown {keycode, ..} => {
+					cpu.set_button(keycode.unwrap(), true);
+				}
+
+				Event::KeyUp {keycode, ..} => {
+					cpu.set_button(keycode.unwrap(), false);
+				}
+
 				_ => {},
 			}
 		}
