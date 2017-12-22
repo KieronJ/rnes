@@ -25,6 +25,7 @@ fn main() {
 	let ppu = Ricoh2C02::new(mapper);
 	let bus = Bus::new(ppu_mapper, ppu);
 	let mut cpu = Ricoh2A03::new(bus);
+	cpu.reset();
 
 	let sdl_context = sdl2::init().unwrap();
 	let mut sdl_event = sdl_context.event_pump().unwrap();

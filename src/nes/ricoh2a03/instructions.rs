@@ -350,7 +350,7 @@ macro_rules! st {
 macro_rules! stabx {
 	($cpu: expr, $reg: expr) => {
 		$cpu.tick();
-		let address = $cpu.absx().wrapping_add($cpu.x as u16);
+		let address = $cpu.abs().wrapping_add($cpu.x as u16);
 		let value = $reg;
 		$cpu.write8(address, value);
 	};
@@ -359,7 +359,7 @@ macro_rules! stabx {
 macro_rules! staby {
 	($cpu: expr, $reg: expr) => {
 		$cpu.tick();
-		let address = $cpu.absy().wrapping_add($cpu.y as u16);
+		let address = $cpu.abs().wrapping_add($cpu.y as u16);
 		let value = $reg;
 		$cpu.write8(address, value);
 	};
@@ -495,15 +495,15 @@ impl Ricoh2A03 {
 			0x6a => { mnemonic!("ROR A"); ror_a!(self); },
 			0x6c => { mnemonic!("JMP ind"); jmp_ind!(self); },
 			0x6d => { mnemonic!("ADC abs"); adc!(self, self.abs()); },
-			0x6e => { mnemonic!("ROR abs"); rol!(self, self.abs()); },
+			0x6e => { mnemonic!("ROR abs"); ror!(self, self.abs()); },
 			0x70 => { mnemonic!("BVS"); branch!(self, self.p.overflow, true); },
 			0x71 => { mnemonic!("ADC ind,y"); adc!(self, self.indy()); },
 			0x75 => { mnemonic!("ADC zp,x"); adc!(self, self.zpx()); },
-			0x76 => { mnemonic!("ROR zp,x"); rol!(self, self.zpx()); },
+			0x76 => { mnemonic!("ROR zp,x"); ror!(self, self.zpx()); },
 			0x78 => { mnemonic!("SEI"); flag!(self, self.p.interrupt, true); },
 			0x79 => { mnemonic!("ADC abs,y"); adc!(self, self.absy()); },
 			0x7d => { mnemonic!("ADC abs,x"); adc!(self, self.absx()); },
-			0x7e => { mnemonic!("ROR abs,x"); rol!(self, self._absx()); },
+			0x7e => { mnemonic!("ROR abs,x"); ror!(self, self._absx()); },
 			0x81 => { mnemonic!("STA ind,x"); st!(self, self.indx(), self.a); },
 			0x84 => { mnemonic!("STY zp"); st!(self, self.zp(), self.y); },
 			0x85 => { mnemonic!("STA zp"); st!(self, self.zp(), self.a); },
@@ -551,7 +551,7 @@ impl Ricoh2A03 {
 			0xc5 => { mnemonic!("CMP zp"); cmp!(self, self.zp(), self.a); },
 			0xc6 => { mnemonic!("DEC zp"); dec!(self, self.zp()); },
 			0xc8 => { mnemonic!("INY"); incr!(self, self.y); },
-			0xc9 => { mnemonic!("CMP imm"); cmp!(self, self.imm(), self.a); },
+			0xc9 => { mnemonic!("CMP #"); cmp!(self, self.imm(), self.a); },
 			0xca => { mnemonic!("DEX"); decr!(self, self.x); },
 			0xcc => { mnemonic!("CPY abs"); cmp!(self, self.abs(), self.y); },
 			0xcd => { mnemonic!("CMP abs"); cmp!(self, self.abs(), self.a); },

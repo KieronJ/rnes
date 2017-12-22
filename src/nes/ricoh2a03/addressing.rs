@@ -17,10 +17,12 @@ impl Ricoh2A03 {
 	}
 
 	pub fn zpx(&mut self) -> u16 {
+		self.tick();
 		(self.zp().wrapping_add(self.x as u16)) % 0x100
 	}
 
 	pub fn zpy(&mut self) -> u16 {
+		self.tick();
 		(self.zp().wrapping_add(self.y as u16)) % 0x100
 	}
 
@@ -30,6 +32,7 @@ impl Ricoh2A03 {
 	}	
 
 	pub fn _absx(&mut self) -> u16 {
+		self.tick();
 		let a = self.abs();
 		let x = self.x as u16;
 		a.wrapping_add(x)

@@ -99,7 +99,7 @@ impl Ricoh2C02 {
 
             palette: vec![0; 0x20].into_boxed_slice(),
 
-            scanline: -1,
+            scanline: 241,
             cycle: 0,
             odd: false,
 
@@ -194,11 +194,11 @@ impl Ricoh2C02 {
     //                if y >= 240 {
     //                    tile_address += 0x800;
     //                }
-    //                tile_address += (((y % 256) / 8) * 32) + ((x % 256) / 8);
+    //                tile_address += (((y % 240) / 8) * 32) + ((x % 256) / 8);
     //                let tile = self.vram_read(tile_address as u16);
     //                let pattern_address = self.bg_pattern_table + (tile as u16 * 0x10);
-    //                let tile_low = self.vram_read(pattern_address + ((y as u16 % 256) % 8));
-    //                let tile_high = self.vram_read(pattern_address + ((y as u16 % 256) % 8) + 8);
+    //                let tile_low = self.vram_read(pattern_address + (y as u16 % 8));
+    //                let tile_high = self.vram_read(pattern_address + (y as u16 % 8) + 8);
     //                let bit = (7 - (x % 8)) as u8;
     //                let mut colour_low = (tile_low & (1 << bit)) >> bit;
     //                let mut colour_high = (tile_high & (1 << bit)) >> bit;
@@ -715,7 +715,7 @@ impl Ricoh2C02 {
 
             if self.cycle == 328 || self.cycle == 336 {
                 if self.rendering_enabled() {
-                    for _ in 0..8 {   
+                    for _ in 0..8 {  
                         self.shift_registers();
                     }
 

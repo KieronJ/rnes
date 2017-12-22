@@ -49,7 +49,6 @@ impl Ricoh2A03 {
     }
 
     pub fn read16_d(&mut self, address1: u16, address2: u16) -> u16 {
-        self.tick();
         (self.read8(address1) as u16) | ((self.read8(address2) as u16) << 8)
     }
 
@@ -83,6 +82,7 @@ impl Ricoh2A03 {
 	}
 
     pub fn write8(&mut self, address: u16, value: u8) {
+		self.tick();
         self.bus.write(address, value)
     }
 }

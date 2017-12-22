@@ -26,7 +26,7 @@ pub struct Ricoh2A03 {
 
 impl Ricoh2A03 {
     pub fn new(bus: Bus) -> Ricoh2A03 {
-        let mut cpu = Ricoh2A03 {
+        Ricoh2A03 {
             pc: 0,
             a: 0,
             x: 0,
@@ -34,9 +34,10 @@ impl Ricoh2A03 {
             s: 0,
             p: Status::new(),
             bus: bus,
-        };
+        }
+    }
 
-        cpu.interrupt(InterruptType::RESET);
-        cpu
+    pub fn reset(&mut self) {
+        self.interrupt(InterruptType::RESET);
     }
 }
