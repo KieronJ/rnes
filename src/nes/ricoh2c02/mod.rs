@@ -58,6 +58,7 @@ pub struct Ricoh2C02 {
 
     sprite_enable: bool,
     background_enable: bool,
+    greyscale: bool,
 
     vblank: bool,
 
@@ -82,6 +83,9 @@ pub struct Ricoh2C02 {
     attribute_latch_low: u8,
     attribute_latch_high: u8,
 
+    next_attribute_latch_low: u8,
+    next_attribute_latch_high: u8,
+
     write_toggle: bool,
 }
 
@@ -99,7 +103,7 @@ impl Ricoh2C02 {
 
             palette: vec![0; 0x20].into_boxed_slice(),
 
-            scanline: 241,
+            scanline: -1,
             cycle: 0,
             odd: false,
 
@@ -112,6 +116,7 @@ impl Ricoh2C02 {
 
             sprite_enable: false,
             background_enable: false,
+            greyscale: false,
 
             vblank: false,
 
@@ -135,6 +140,9 @@ impl Ricoh2C02 {
 
             attribute_latch_low: 0,
             attribute_latch_high: 0,
+
+            next_attribute_latch_low: 0,
+            next_attribute_latch_high: 0,
 
             write_toggle: false,
         }
@@ -417,6 +425,8 @@ impl Ricoh2C02 {
                     self.vram_increment = 1;
                 }
 
+                self.greyscale = (self.latch & 0x1) != 0;
+
                 self.temp_vram_address &= !0x0c00;
                 self.temp_vram_address |= ((self.latch as u16) & 0x03) << 10;
 
@@ -562,7 +572,13 @@ impl Ricoh2C02 {
             address &= 0x0f;
         }
 
-        self.palette[address]
+        let mut colour = self.palette[address];
+
+        if self.greyscale {
+            colour &= 0x30;
+        }
+
+        colour
     }
 
     pub fn palette_write(&mut self, address: u16, value: u8) {
@@ -643,6 +659,9 @@ impl Ricoh2C02 {
                 self.tile_shift_low |= self.tile_low as u16;
                 self.tile_shift_high |= self.tile_high as u16;
 
+                self.attribute_latch_low = self.next_attribute_latch_low;
+                self.attribute_latch_high = self.next_attribute_latch_high;
+
                 let tile_address = self.get_tile_address();
                 let tile = self.vram_read(tile_address);
                 self.tile_address = self.bg_pattern_table;
@@ -658,8 +677,8 @@ impl Ricoh2C02 {
                 let mut bits = self.vram_read(attribute_address);
                 bits >>= shift;
 
-                self.attribute_latch_low = bits & 0x1;
-                self.attribute_latch_high = (bits & 0x2) >> 1;
+                self.next_attribute_latch_low = bits & 0x1;
+                self.next_attribute_latch_high = (bits & 0x2) >> 1;
             },
 
             5 => {
