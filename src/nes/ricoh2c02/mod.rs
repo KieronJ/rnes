@@ -58,9 +58,10 @@ pub struct Ricoh2C02 {
 
     sprite_enable: bool,
     background_enable: bool,
-    greyscale: bool,
 
     vblank: bool,
+    sprite_0_hit: bool,
+    sprite_overflow: bool,
 
     should_nmi: bool,
 
@@ -69,6 +70,8 @@ pub struct Ricoh2C02 {
     vram_address: u16,
     temp_vram_address: u16,
     fine_x_scroll: u8,
+
+    write_toggle: bool,
 
     tile_address: u16,
     tile_low: u8,
@@ -86,7 +89,24 @@ pub struct Ricoh2C02 {
     next_attribute_latch_low: u8,
     next_attribute_latch_high: u8,
 
-    write_toggle: bool,
+    oam: Box<[u8]>,
+    secondary_oam: Box<[u8]>,
+
+    oam_addr: u8,
+    oam_2_addr: u8,
+    oam_buffer: u8,
+
+    sprite_inrange: bool,
+    oam_2_full: bool,
+
+    sprite_byte: usize,
+    sprite_count: usize,
+
+    sprite_shift_low: [u8; 8],
+    sprite_shift_high: [u8; 8],
+
+    sprite_latch: [u8; 8],
+    sprite_counter: [u8; 8],
 }
 
 impl Ricoh2C02 {
@@ -112,13 +132,14 @@ impl Ricoh2C02 {
 
             nmi_enable: false,
             bg_pattern_table: 0,
-            vram_increment: 1,
+            vram_increment: 0,
 
             sprite_enable: false,
             background_enable: false,
-            greyscale: false,
 
             vblank: false,
+            sprite_0_hit: false,
+            sprite_overflow: false,
 
             should_nmi: false,
 
@@ -127,6 +148,8 @@ impl Ricoh2C02 {
             vram_address: 0,
             temp_vram_address: 0,
             fine_x_scroll: 0,
+
+            write_toggle: false,
 
             tile_address: 0,
             tile_low: 0,
@@ -144,7 +167,24 @@ impl Ricoh2C02 {
             next_attribute_latch_low: 0,
             next_attribute_latch_high: 0,
 
-            write_toggle: false,
+            oam: vec![0; 256].into_boxed_slice(),
+            secondary_oam: vec![0; 32].into_boxed_slice(),
+
+            oam_addr: 0,
+            oam_2_addr: 0,
+            oam_buffer: 0,
+
+            sprite_inrange: false,
+            oam_2_full: false,
+
+            sprite_byte: 0,
+            sprite_count: 0,
+
+            sprite_shift_low: [0; 8],
+            sprite_shift_high: [0; 8],
+
+            sprite_latch: [0; 8],
+            sprite_counter: [0; 8],
         }
     }
 
@@ -356,6 +396,8 @@ impl Ricoh2C02 {
             PPU_STATUS => {
                 self.latch &= 0x1f;
                 self.latch |= (self.vblank as u8) << 7;
+                self.latch |= (self.sprite_0_hit as u8) << 6;
+                self.latch |= (self.sprite_overflow as u8) << 5;
 
                 self.vblank = false;
                 self.write_toggle = false;
@@ -387,6 +429,7 @@ impl Ricoh2C02 {
 
                 if (vram_address & 0x3fff) >= 0x3f00 {
                     self.latch = self.vram_read(vram_address);
+                    self.read_buffer = self.nametable_read(vram_address);
                 }
 
                 if self.rendering_enabled()
@@ -424,8 +467,6 @@ impl Ricoh2C02 {
                 } else {
                     self.vram_increment = 1;
                 }
-
-                self.greyscale = (self.latch & 0x1) != 0;
 
                 self.temp_vram_address &= !0x0c00;
                 self.temp_vram_address |= ((self.latch as u16) & 0x03) << 10;
@@ -572,13 +613,7 @@ impl Ricoh2C02 {
             address &= 0x0f;
         }
 
-        let mut colour = self.palette[address];
-
-        if self.greyscale {
-            colour &= 0x30;
-        }
-
-        colour
+        self.palette[address]
     }
 
     pub fn palette_write(&mut self, address: u16, value: u8) {
@@ -637,13 +672,12 @@ impl Ricoh2C02 {
     }
 
     pub fn get_tile_address(&mut self) -> u16 {
-        let address = 0x2000 | (self.vram_address & 0x0fff);
-        address
+        0x2000 | (self.vram_address & 0x0fff)
     }
 
     pub fn get_attribute_address(&mut self) -> u16 {
         let mut address = 0x23c0;
-        address |= self.vram_address & 0x0c000;
+        address |= self.vram_address & 0x0c00;
         address |= (self.vram_address >> 4) & 0x38;
         address |= (self.vram_address >> 2) & 0x07;
         address
@@ -705,9 +739,77 @@ impl Ricoh2C02 {
         self.attribute_shift_high |= self.attribute_latch_high;
     }
 
+    pub fn sprite_evaluation(&mut self) {
+        if !self.rendering_enabled() {
+            return;
+        }
+
+        if self.cycle < 65 {
+            self.secondary_oam[(self.cycle - 1) >> 1] = 0xff;
+            return;
+        } else {
+            if self.cycle == 65 {
+                self.oam_2_addr = 0;
+                self.oam_2_full = false;
+                self.sprite_byte = 0;
+                self.sprite_count = 0;
+            }
+
+            if (self.cycle & 0x1) != 0 {
+                let oam_addr = self.oam_addr as usize;
+
+                self.oam_buffer = self.oam[oam_addr];
+            } else {
+                if !self.oam_2_full {
+                    let oam_2_addr = self.oam_2_addr as usize;
+
+                    self.secondary_oam[oam_2_addr] = self.oam_buffer;
+                    self.sprite_byte = (self.sprite_byte + 1) & 4;
+                }
+
+                if self.sprite_byte == 0 {
+                    let scanline = self.scanline as u8;
+
+                    self.sprite_inrange = scanline >= self.oam_buffer
+                                        && scanline < self.oam_buffer + 8;
+
+                    if self.sprite_inrange {
+                        self.sprite_count += 1;
+                    }
+                }
+
+                if self.sprite_inrange {
+                    self.oam_2_addr += 1;
+
+                    if self.oam_2_addr >= 0x20 {
+                        self.oam_2_full = true;
+                    }
+                }
+
+                if self.sprite_count == 8 {
+                    if self.sprite_inrange {
+                        self.sprite_overflow = true;
+                    } else {
+                        self.oam_addr = self.oam_addr.wrapping_add(4);
+                    }
+                }
+
+                self.oam_addr = self.oam_addr.wrapping_add(1);
+
+                if self.oam_addr == 0 {
+                    self.oam_2_full = true;
+                }
+            }
+        }
+    }
+
     pub fn process_scanline(&mut self) {
         if self.cycle <= 256 {
             self.load_tile_info();
+
+            //if self.scanline == 30 {
+            //    self.sprite0 = true;
+            //}
 
             if self.rendering_enabled() && (self.cycle & 0x7) == 0 {
                 self.increment_horizontal_scroll();
@@ -720,6 +822,8 @@ impl Ricoh2C02 {
             if self.scanline != PPU_PRERENDER {
                 self.draw_pixel();
                 self.shift_registers();
+
+                self.sprite_evaluation();
             }
         }
 
@@ -747,7 +851,8 @@ impl Ricoh2C02 {
     pub fn process_prerender(&mut self) {
         if self.cycle == 1 {
             self.vblank = false;
-            //Sprite Zero, Sprite Overflow
+            self.sprite_0_hit = false;
+            self.sprite_overflow = false;
         }
 
         else if self.cycle >= 280 && self.cycle <= 304 {
@@ -761,7 +866,6 @@ impl Ricoh2C02 {
         if self.cycle == 1 {
             self.vblank = true;
             self.redraw = true;
-            //NMI
 
             if self.nmi_enable {
                 self.should_nmi = true;

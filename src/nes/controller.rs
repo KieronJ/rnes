@@ -26,7 +26,7 @@ impl Controller {
             return 0x40 | (self.state & 0x1);
         }
 
-        let key = 0x40  | (self.state_locked & 0x1);
+        let key = 0x40 | (self.state_locked & 0x1);
         self.state_locked = 0x80 | (self.state_locked >> 1);
 
         return key;

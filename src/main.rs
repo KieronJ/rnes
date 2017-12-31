@@ -13,10 +13,17 @@ use sdl2::event::*;
 use sdl2::keyboard::*;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::rect::Rect;
+use std::env;
+use std::thread;
+use std::time;
+use std::time::Instant;
 use util::open_file;
 
+pub const FRAME_TIME: f64 = (1.0 / 60.0) * 1000.0;
+
 fn main() {
-	let mut rom_file = open_file("smb.nes").unwrap();
+	let rom_filepath = env::args().nth(1).unwrap();
+	let mut rom_file = open_file(rom_filepath).unwrap();
 	let rom = Rom::new(&mut rom_file);
 
 	let mapper = create_mapper(rom.clone());
@@ -51,29 +58,13 @@ fn main() {
 
 	let mut running = true;
 
+	let mut start_time = Instant::now();
+	let mut end_time;
+	let mut elapsed;
+	let mut elapsed_ms;
+	let mut sleep_time;
+
 	while running {
-		for event in sdl_event.poll_iter() {
-			match event {
-				Event::Quit {..} => {
-					running = false;
-				},
-
-				Event::KeyDown {keycode: Some(Keycode::Escape), ..} => {
-					running = false;
-				},
-
-				Event::KeyDown {keycode, ..} => {
-					cpu.set_button(keycode.unwrap(), true);
-				}
-
-				Event::KeyUp {keycode, ..} => {
-					cpu.set_button(keycode.unwrap(), false);
-				}
-
-				_ => {},
-			}
-		}
-
 		if cpu.should_nmi() {
 			cpu.interrupt(InterruptType::NMI);
 		}
@@ -85,6 +76,28 @@ fn main() {
 		cpu.step();
 
 		if cpu.should_redraw() {
+			for event in sdl_event.poll_iter() {
+				match event {
+					Event::Quit {..} => {
+						running = false;
+					},
+
+					Event::KeyDown {keycode: Some(Keycode::Escape), ..} => {
+						running = false;
+					},
+
+					Event::KeyDown {keycode, ..} => {
+						cpu.set_button(keycode.unwrap(), true);
+					},
+
+					Event::KeyUp {keycode, ..} => {
+						cpu.set_button(keycode.unwrap(), false);
+					},
+
+					_ => {}
+				}
+			}
+
 			sdl_canvas.clear();
 			cpu.draw_screen(&mut sdl_texture);
 			sdl_canvas.copy(&sdl_texture, None, Some(Rect::new(0, 0, 256, 240))).unwrap();
@@ -94,6 +107,21 @@ fn main() {
 			//cpu.draw_nametables(&mut nt_texture);
 			//nt_canvas.copy(&nt_texture, None, Some(Rect::new(0, 0, 512, 480))).unwrap();
 			//nt_canvas.present();
+
+			end_time = Instant::now();
+			
+			elapsed = end_time.duration_since(start_time);
+			elapsed_ms = (elapsed.as_secs() as f64 * 1000.0) + (elapsed.subsec_nanos() as f64 / 1000000.0);
+
+			if elapsed_ms < FRAME_TIME {
+				sleep_time = (FRAME_TIME - elapsed_ms) as u64;
+
+				if sleep_time != 0 {
+					thread::sleep(time::Duration::from_millis(sleep_time));
+				}
+			}
+
+			start_time = Instant::now();
 		}
 	}
 }

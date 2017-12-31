@@ -45,9 +45,9 @@ impl Bus {
             return self.ppu.io_read(0x2000 + (address % 8));
         }
 
-        //if self.controller.in_range(address) {
-        //    self.controller.io_read();
-        //}
+        if self.controller.in_range(address) {
+            return self.controller.io_read();
+        }
 
         if self.mapper.in_range(address) {
             return self.mapper.read_prg(address);
@@ -91,9 +91,9 @@ impl Bus {
             return self.mapper.write_prg(address, value);
         }
 
-        //if self.controller.in_range(address) {
-        //    self.controller.io_write(value);
-        //}
+        if self.controller.in_range(address) {
+            self.controller.io_write(value);
+        }
 
         if address >= 0x4000 && address <= 0x4020 {
             return;
