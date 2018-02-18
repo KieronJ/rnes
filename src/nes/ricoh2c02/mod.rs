@@ -2,6 +2,8 @@ extern crate sdl2;
 
 use nes::mapper::Mapper;
 use nes::rom::MirrorMode;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub const PPU_START: u16 = 0x2000;
 pub const PPU_END: u16 = 0x3fff;
@@ -34,7 +36,7 @@ static PALETTE: [u8; 192] = [
 ];
 
 pub struct Ricoh2C02 {
-    mapper: Box<Mapper+Send>,
+    mapper: Rc<RefCell<Box<Mapper+Send>>>,
 
     framebuffer: Box<[u8]>,
 
@@ -110,7 +112,7 @@ pub struct Ricoh2C02 {
 }
 
 impl Ricoh2C02 {
-    pub fn new(mapper: Box<Mapper+Send>) -> Ricoh2C02 {
+    pub fn new(mapper: Rc<RefCell<Box<Mapper+Send>>>) -> Ricoh2C02 {
         Ricoh2C02 {
             mapper: mapper,
 
@@ -552,26 +554,31 @@ impl Ricoh2C02 {
             return self.nametable_0[address]
         }
 
+        let mapper = self.mapper.borrow_mut();
+
         if address < 0x800 {
-            match self.mapper.mirroring() {
+            match mapper.mirroring() {
                 MirrorMode::Horizontal => return self.nametable_0[address - 0x400],
                 MirrorMode::Vertical => return self.nametable_1[address - 0x400],
                 MirrorMode::FourScreen => return self.nametable_1[address - 0x400],
+                MirrorMode::OneScreen => return self.nametable_0[address - 0x400],
             }
         }
 
         if address < 0xc00 {
-            match self.mapper.mirroring() {
+            match mapper.mirroring() {
                 MirrorMode::Horizontal => return self.nametable_2[address - 0x800],
                 MirrorMode::Vertical => return self.nametable_0[address - 0x800],
                 MirrorMode::FourScreen => return self.nametable_2[address - 0x800],
+                MirrorMode::OneScreen => return self.nametable_0[address - 0x800]
             }
         }
 
-        match self.mapper.mirroring() {
+        match mapper.mirroring() {
             MirrorMode::Horizontal => self.nametable_2[address - 0xc00],
             MirrorMode::Vertical => self.nametable_1[address - 0xc00],
             MirrorMode::FourScreen => self.nametable_3[address - 0xc00],
+            MirrorMode::OneScreen => return self.nametable_0[address - 0xc00]
         }
     }
 
@@ -582,26 +589,31 @@ impl Ricoh2C02 {
             return self.nametable_0[address] = value;
         }
 
+        let mapper = self.mapper.borrow_mut();
+
         if address < 0x800 {
-            return match self.mapper.mirroring() {
+            return match mapper.mirroring() {
                 MirrorMode::Horizontal => self.nametable_0[address - 0x400] = value,
                 MirrorMode::Vertical => self.nametable_1[address - 0x400] = value,
                 MirrorMode::FourScreen => self.nametable_1[address - 0x400] = value,
+                MirrorMode::OneScreen => self.nametable_0[address - 0x400] = value,
             };
         }
 
         if address < 0xc00 {
-            return match self.mapper.mirroring() {
+            return match mapper.mirroring() {
                 MirrorMode::Horizontal => self.nametable_2[address - 0x800] = value,
                 MirrorMode::Vertical => self.nametable_0[address - 0x800] = value,
                 MirrorMode::FourScreen => self.nametable_2[address - 0x800] = value,
+                MirrorMode::OneScreen => self.nametable_2[address - 0x800] = value,
             };
         }
 
-        return match self.mapper.mirroring() {
+        return match mapper.mirroring() {
             MirrorMode::Horizontal => self.nametable_2[address - 0xc00] = value,
             MirrorMode::Vertical => self.nametable_1[address - 0xc00] = value,
             MirrorMode::FourScreen => self.nametable_3[address - 0xc00] = value,
+            MirrorMode::OneScreen => self.nametable_3[address - 0xc00] = value,
         };
     }
 
@@ -896,7 +908,8 @@ impl Ricoh2C02 {
         let address = address & 0x3fff;
 
         if address < 0x2000 {
-            return self.mapper.read_chr(address)
+            let mapper = self.mapper.borrow_mut();
+            return mapper.read_chr(address)
         }
 
         if address < 0x3f00 {
@@ -910,7 +923,8 @@ impl Ricoh2C02 {
         let address = address & 0x3fff;
 
         if address < 0x2000 {
-            return self.mapper.write_chr(address, value);
+            let mut mapper = self.mapper.borrow_mut();
+            return mapper.write_chr(address, value);
         }
 
         if address < 0x3f00 {

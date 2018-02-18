@@ -16,6 +16,8 @@ use sdl2::rect::Rect;
 use std::env;
 use std::thread;
 use std::time;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Instant;
 use util::open_file;
 
@@ -26,11 +28,10 @@ fn main() {
 	let mut rom_file = open_file(rom_filepath).unwrap();
 	let rom = Rom::new(&mut rom_file);
 
-	let mapper = create_mapper(rom.clone());
-	let ppu_mapper = create_mapper(rom);
+	let mapper = Rc::new(RefCell::new(create_mapper(rom)));
 
-	let ppu = Ricoh2C02::new(mapper);
-	let bus = Bus::new(ppu_mapper, ppu);
+	let ppu = Ricoh2C02::new(mapper.clone());
+	let bus = Bus::new(mapper, ppu);
 	let mut cpu = Ricoh2A03::new(bus);
 	cpu.reset();
 

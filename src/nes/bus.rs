@@ -4,18 +4,20 @@ use nes::controller::Controller;
 use nes::mapper::Mapper;
 use nes::ricoh2c02::Ricoh2C02;
 use sdl2::keyboard::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub const RAM_SIZE: usize = 0x800;
 
 pub struct Bus {
     controller: Controller,
-    mapper: Box<Mapper+Send>,
+    mapper: Rc<RefCell<Box<Mapper+Send>>>,
     ppu: Ricoh2C02,
     ram: Box<[u8]>,
 }
 
 impl Bus {
-    pub fn new(mapper: Box<Mapper+Send>, ppu: Ricoh2C02) -> Bus {
+    pub fn new(mapper: Rc<RefCell<Box<Mapper+Send>>>, ppu: Ricoh2C02) -> Bus {
         Bus {
             controller: Controller::new(),
             mapper: mapper,
@@ -49,8 +51,9 @@ impl Bus {
             return self.controller.io_read();
         }
 
-        if self.mapper.in_range(address) {
-            return self.mapper.read_prg(address);
+        let mapper = self.mapper.borrow_mut();
+        if mapper.in_range(address) {
+            return mapper.read_prg(address);
         }
 
         if address >= 0x4000 && address <= 0x4020 {
@@ -87,8 +90,9 @@ impl Bus {
             return self.ppu.io_write(0x2000 + (address % 8), value);
         }
 
-        if self.mapper.in_range(address) {
-            return self.mapper.write_prg(address, value);
+        let mut mapper = self.mapper.borrow_mut();
+        if mapper.in_range(address) {
+            return mapper.write_prg(address, value);
         }
 
         if self.controller.in_range(address) {

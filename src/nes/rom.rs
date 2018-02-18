@@ -8,6 +8,7 @@ pub enum MirrorMode {
     Horizontal,
     Vertical,
     FourScreen,
+    OneScreen
 }
 
 #[derive(Clone)]
@@ -80,12 +81,12 @@ impl Rom {
         }
     }
 
-    pub fn read_chr(&self, address: u16) -> u8 {
-        self.chr[address as usize]
+    pub fn read_chr(&self, address: usize) -> u8 {
+        self.chr[address]
     }
 
-    pub fn read_prg(&self, address: u16) -> u8 {
-        self.prg[address as usize]
+    pub fn read_prg(&self, address: usize) -> u8 {
+        self.prg[address]
     }
 
     pub fn prg_banks(&self) -> usize {

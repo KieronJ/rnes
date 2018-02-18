@@ -27,11 +27,11 @@ pub struct Ricoh2A03 {
 impl Ricoh2A03 {
     pub fn new(bus: Bus) -> Ricoh2A03 {
         Ricoh2A03 {
-            pc: 0,
+            pc: 0xc000,
             a: 0,
             x: 0,
             y: 0,
-            s: 0,
+            s: 0xfd,
             p: Status::new(),
             bus: bus,
         }
