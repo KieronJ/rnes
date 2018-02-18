@@ -1,7 +1,6 @@
 use nes::mapper::Mapper;
 use nes::rom::MirrorMode;
 use nes::rom::Rom;
-use nes::rom::ROM_CHR_BANK_SIZE;
 use nes::rom::ROM_PRG_BANK_SIZE;
 
 pub struct Mmc1 {
@@ -16,13 +15,15 @@ pub struct Mmc1 {
 
 impl Mmc1 {
     pub fn new(rom: Rom) -> Mmc1 {
+        println!("Mapper #{}", rom.mapper());
+
         Mmc1 {
             rom: rom,
             prg_ram: vec![0; 0x2000].into_boxed_slice(),
             chr_ram: vec![0; 0x2000].into_boxed_slice(),
 
             shift: 0b10000,
-            control: 0xc,
+            control: 0xc | 0x3,
             prg_bank: 0
         }
     }

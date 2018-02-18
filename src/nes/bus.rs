@@ -90,13 +90,33 @@ impl Bus {
             return self.ppu.io_write(0x2000 + (address % 8), value);
         }
 
-        let mut mapper = self.mapper.borrow_mut();
-        if mapper.in_range(address) {
-            return mapper.write_prg(address, value);
+        {
+            let mut mapper = self.mapper.borrow_mut();
+            if mapper.in_range(address) {
+                return mapper.write_prg(address, value);
         }
 
+        }
         if self.controller.in_range(address) {
             self.controller.io_write(value);
+        }
+
+        if address == 0x4014 {
+            for i in 0..256 {
+                let transfer_address = ((value as u16) << 8) | i;
+
+                let data = self.read(transfer_address);
+                self.tick();
+
+                self.write(0x2004, data);
+                self.tick();
+
+                self.tick();
+
+                if self.ppu.odd() {
+                    self.tick();
+                }
+            }
         }
 
         if address >= 0x4000 && address <= 0x4020 {

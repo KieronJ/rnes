@@ -56,6 +56,7 @@ pub struct Ricoh2C02 {
 
     nmi_enable: bool,
     bg_pattern_table: u16,
+    sprite_pattern_table: u16,
     vram_increment: u16,
 
     sprite_enable: bool,
@@ -104,6 +105,8 @@ pub struct Ricoh2C02 {
     sprite_byte: usize,
     sprite_count: usize,
 
+    sprite_fill_count: usize,
+
     sprite_shift_low: [u8; 8],
     sprite_shift_high: [u8; 8],
 
@@ -134,6 +137,7 @@ impl Ricoh2C02 {
 
             nmi_enable: false,
             bg_pattern_table: 0,
+            sprite_pattern_table: 0,
             vram_increment: 0,
 
             sprite_enable: false,
@@ -182,6 +186,8 @@ impl Ricoh2C02 {
             sprite_byte: 0,
             sprite_count: 0,
 
+            sprite_fill_count: 0,
+
             sprite_shift_low: [0; 8],
             sprite_shift_high: [0; 8],
 
@@ -190,24 +196,63 @@ impl Ricoh2C02 {
         }
     }
 
-    pub fn copy_horizontal_bits(&mut self) {
+    pub fn odd(&self) -> bool {
+        return self.odd;
+    }
+
+    fn copy_horizontal_bits(&mut self) {
         self.vram_address &= !0x041f;
         self.vram_address |= self.temp_vram_address & 0x041f;
     }
 
-    pub fn copy_vertical_bits(&mut self) {
+    fn copy_vertical_bits(&mut self) {
         self.vram_address &= !0x7be0;
         self.vram_address |= self.temp_vram_address & 0x7be0;
     }
 
-    pub fn draw_pixel(&mut self) {
+    fn draw_pixel(&mut self) {
         let address = ((self.scanline as usize) << 8) + self.cycle - 1;
 
         if self.rendering_enabled() || (self.vram_address & 0x3f00) != 0x3f00 {
-            let mut colour = self.get_pixel_colour();
+            let mut colour = 0;
 
-            if (colour & 0x03) == 0 {
-                colour = 0;
+            if self.background_enable {
+                colour = self.get_pixel_colour();
+
+                if (colour & 0x03) == 0 {
+                    colour = 0;
+                }
+            }
+
+            if self.sprite_enable && self.cycle <= 248 {
+                for i in 0..8 {
+                    if self.sprite_counter[i] == 0 {
+                        let mut sprite_colour = (self.sprite_latch[i] & 0x03) << 2;
+
+                        if self.sprite_latch[i] & 0x40 != 0 {
+                            sprite_colour |= (self.sprite_shift_high[i] & 0x01) << 1;
+                            sprite_colour |= self.sprite_shift_low[i] & 0x01;
+                        } else {
+                            sprite_colour |= (self.sprite_shift_high[i] & 0x80) >> 6;
+                            sprite_colour |= (self.sprite_shift_low[i] & 0x80) >> 7;
+                        }
+
+                        if (sprite_colour & 0x03) == 0 {
+                            sprite_colour = 0;
+                        }
+
+                        if i == 0 && colour != 0 && sprite_colour != 0 {
+                            self.sprite_0_hit = true;
+                        }
+
+                        if (self.sprite_latch[i] & 0x20 == 0) || (colour == 0) {
+                            if sprite_colour != 0 {
+                                self.framebuffer[address] = self.palette_read((sprite_colour | 0x10) as u16);
+                                return;
+                            }
+                        }
+                    }
+                }
             }
 
             self.framebuffer[address] = self.palette_read(colour as u16);
@@ -412,7 +457,11 @@ impl Ricoh2C02 {
             },
 
             PPU_OAMDATA => {
-                //println!("PPU_OAMDATA");
+                self.latch = self.oam[self.oam_addr as usize];
+
+                if self.scanline >= PPU_VBLANK_START || self.rendering_enabled() {
+                    self.oam_addr = self.oam_addr.wrapping_add(1);
+                }
             },
 
             PPU_SCROLL => {
@@ -457,11 +506,22 @@ impl Ricoh2C02 {
             PPU_CTRL => {
                 self.nmi_enable = (self.latch & 0x80) != 0;
 
+                if (self.latch & 0x20) != 0 {
+                    panic!("8x16 sprite mode not supported!");
+                }
+
                 if (self.latch & 0x10) != 0 {
                     self.bg_pattern_table = 0x1000;
                 }
                 else {
                     self.bg_pattern_table = 0;
+                }
+
+                if (self.latch & 0x08) != 0 {
+                    self.sprite_pattern_table = 0x1000;
+                }
+                else {
+                    self.sprite_pattern_table = 0;
                 }
 
                 if (self.latch & 0x04) != 0 {
@@ -479,7 +539,7 @@ impl Ricoh2C02 {
             PPU_MASK => {
                 self.sprite_enable = (self.latch & 0x10) != 0;
                 self.background_enable = (self.latch & 0x08) != 0;
-
+                
                 //println!("0x{:02x} -> PPU_MASK", self.latch);
             },
 
@@ -488,11 +548,12 @@ impl Ricoh2C02 {
             },
 
             PPU_OAMADDR => {
-                //println!("PPU_OAMADDR");
+                self.oam_addr = self.latch;
             },
 
             PPU_OAMDATA => {
-                //println!("PPU_OAMDATA");
+                self.oam[self.oam_addr as usize] = self.latch;
+                self.oam_addr = self.oam_addr.wrapping_add(1);
             },
 
             PPU_SCROLL => {
@@ -749,67 +810,57 @@ impl Ricoh2C02 {
 
         self.attribute_shift_high <<= 1;
         self.attribute_shift_high |= self.attribute_latch_high;
+
+        for i in 0..8 {
+            if self.sprite_counter[i] == 0 {
+                if self.sprite_latch[i] & 0x40 != 0 {
+                    self.sprite_shift_low[i] >>= 1;
+                    self.sprite_shift_high[i] >>= 1;
+                } else {
+                    self.sprite_shift_low[i] <<= 1;
+                    self.sprite_shift_high[i] <<= 1;
+                }
+            }
+        }
     }
 
-    pub fn sprite_evaluation(&mut self) {
-        if !self.rendering_enabled() {
-            return;
-        }
+    fn sprite_inrange(&self, sprite: u8, scanline: isize) -> bool {
+        let sprite = sprite as isize;
 
+        scanline >= sprite && scanline < sprite + 8
+    }
+
+    fn sprite_evaluation(&mut self) {
         if self.cycle < 65 {
             self.secondary_oam[(self.cycle - 1) >> 1] = 0xff;
             return;
+        }
+
+        if self.cycle == 65 {
+            self.oam_addr = 0;
+            self.oam_2_addr = 0;
+        }
+
+        if self.cycle % 2 == 1 {
+            self.oam_buffer = self.oam[self.oam_addr as usize];
         } else {
-            if self.cycle == 65 {
-                self.oam_2_addr = 0;
-                self.oam_2_full = false;
-                self.sprite_byte = 0;
-                self.sprite_count = 0;
-            }
+            if self.oam_2_addr < 32 {
+                self.secondary_oam[self.oam_2_addr as usize] = self.oam_buffer;
 
-            if (self.cycle & 0x1) != 0 {
-                let oam_addr = self.oam_addr as usize;
+                if self.sprite_inrange(self.oam_buffer, self.scanline) {
+                    self.secondary_oam[(self.oam_2_addr as usize) + 1] = self.oam[(self.oam_addr as usize) + 1];
+                    self.secondary_oam[(self.oam_2_addr as usize) + 2] = self.oam[(self.oam_addr as usize) + 2];
+                    self.secondary_oam[(self.oam_2_addr as usize) + 3] = self.oam[(self.oam_addr as usize) + 3];
 
-                self.oam_buffer = self.oam[oam_addr];
+                    self.oam_2_addr += 4;
+                }
+
+                self.oam_addr = self.oam_addr.wrapping_add(4);
             } else {
-                if !self.oam_2_full {
-                    let oam_2_addr = self.oam_2_addr as usize;
-
-                    self.secondary_oam[oam_2_addr] = self.oam_buffer;
-                    self.sprite_byte = (self.sprite_byte + 1) & 4;
-                }
-
-                if self.sprite_byte == 0 {
-                    let scanline = self.scanline as u8;
-
-                    self.sprite_inrange = scanline >= self.oam_buffer
-                                        && scanline < self.oam_buffer + 8;
-
-                    if self.sprite_inrange {
-                        self.sprite_count += 1;
-                    }
-                }
-
-                if self.sprite_inrange {
-                    self.oam_2_addr += 1;
-
-                    if self.oam_2_addr >= 0x20 {
-                        self.oam_2_full = true;
-                    }
-                }
-
-                if self.sprite_count == 8 {
-                    if self.sprite_inrange {
-                        self.sprite_overflow = true;
-                    } else {
-                        self.oam_addr = self.oam_addr.wrapping_add(4);
-                    }
-                }
-
-                self.oam_addr = self.oam_addr.wrapping_add(1);
-
-                if self.oam_addr == 0 {
-                    self.oam_2_full = true;
+                if self.sprite_inrange(self.oam_buffer, self.scanline) {
+                    self.sprite_overflow = true;
+                } else {
+                    self.oam_addr = self.oam_addr.wrapping_add(5);
                 }
             }
         }
@@ -818,10 +869,6 @@ impl Ricoh2C02 {
     pub fn process_scanline(&mut self) {
         if self.cycle <= 256 {
             self.load_tile_info();
-
-            //if self.scanline == 30 {
-            //    self.sprite0 = true;
-            //}
 
             if self.rendering_enabled() && (self.cycle & 0x7) == 0 {
                 self.increment_horizontal_scroll();
@@ -832,6 +879,12 @@ impl Ricoh2C02 {
             }
 
             if self.scanline != PPU_PRERENDER {
+                for i in 0..8 {
+                    if self.sprite_counter[i] > 0 {
+                        self.sprite_counter[i] -= 1;
+                    }
+                }
+
                 self.draw_pixel();
                 self.shift_registers();
 
@@ -839,21 +892,64 @@ impl Ricoh2C02 {
             }
         }
 
-        else if self.cycle == 257 {
-            if self.rendering_enabled() {
-                self.copy_horizontal_bits();
+        else if self.cycle >= 257 && self.cycle <= 320 {
+            if self.cycle == 257 {
+                self.sprite_fill_count = 0;
+
+                if self.rendering_enabled() {
+                    self.copy_horizontal_bits();
+                }  
+            }
+
+            match self.cycle & 0x07 {
+                1 => {
+                    self.sprite_latch[self.sprite_fill_count] = self.secondary_oam[(self.sprite_fill_count * 4) + 2];
+                    self.sprite_counter[self.sprite_fill_count] = self.secondary_oam[(self.sprite_fill_count * 4) + 3];
+                },
+
+                5 => {
+                    let mut pattern_address = self.sprite_pattern_table;
+                    pattern_address |= (self.secondary_oam[(self.sprite_fill_count * 4) + 1] as u16) << 4;
+
+                    if self.sprite_latch[(self.sprite_fill_count)] & 0x80 != 0 {
+                        pattern_address |= 7 - ((self.scanline as u16) - self.secondary_oam[(self.sprite_fill_count * 4)] as u16);
+
+                    } else {
+                        pattern_address |= (self.scanline as u16) - self.secondary_oam[(self.sprite_fill_count * 4)] as u16;
+                    }
+
+                    self.sprite_shift_low[self.sprite_fill_count] = self.vram_read(pattern_address);
+                },
+
+                7 => {
+                    let mut pattern_address = self.sprite_pattern_table;
+                    pattern_address |= (self.secondary_oam[(self.sprite_fill_count * 4) + 1] as u16) << 4;
+                    pattern_address |= self.sprite_fill_count as u16;
+
+                    if self.sprite_latch[(self.sprite_fill_count)] & 0x80 != 0 {
+                        pattern_address |= 7 - ((self.scanline as u16) - self.secondary_oam[(self.sprite_fill_count * 4)] as u16);
+
+                    } else {
+                        pattern_address |= (self.scanline as u16) - self.secondary_oam[(self.sprite_fill_count * 4)] as u16;
+                    }
+
+                    self.sprite_shift_high[self.sprite_fill_count] = self.vram_read(pattern_address.wrapping_add(8));
+
+                    self.sprite_fill_count += 1;
+                },
+                _ => ()
             }
         }
 
         else if self.cycle >= 321 && self.cycle <= 336 {
             self.load_tile_info();
 
+            if self.scanline != PPU_PRERENDER {
+                self.shift_registers();
+            }
+
             if self.cycle == 328 || self.cycle == 336 {
                 if self.rendering_enabled() {
-                    for _ in 0..8 {  
-                        self.shift_registers();
-                    }
-
                     self.increment_horizontal_scroll();
                 }
             }
