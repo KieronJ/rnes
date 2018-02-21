@@ -45,7 +45,7 @@ macro_rules! asl {
 		let address = $address;
 		let value = $cpu.read8(address);
 		$cpu.p.carry = (value & 0x80) != 0;
-		$cpu.tick();
+		$cpu.write8(address, value);
 		$cpu.set_nz(value << 1);
 		$cpu.write8(address, value << 1);
 	};
@@ -104,7 +104,7 @@ macro_rules! dcp {
 		let address = $address;
 		let value = $cpu.read8(address);
 
-		$cpu.tick();
+		$cpu.write8(address, value);
 
 		let result = value.wrapping_sub(1);
 		$cpu.write8(address, result);
@@ -119,7 +119,7 @@ macro_rules! dec {
 	($cpu: expr, $address: expr) => {
 		let address = $address;
 		let value = $cpu.read8(address);
-		$cpu.tick();
+		$cpu.write8(address, value);
 		let result = value.wrapping_sub(1);
 		$cpu.set_nz(result);
 		$cpu.write8(address, result);
@@ -156,7 +156,7 @@ macro_rules! inc {
 	($cpu: expr, $address: expr) => {
 		let address = $address;
 		let value = $cpu.read8(address);
-		$cpu.tick();
+		$cpu.write8(address, value);
 		let result = value.wrapping_add(1);
 		$cpu.set_nz(result);
 		$cpu.write8(address, result);
@@ -177,7 +177,7 @@ macro_rules! isc {
 		let address = $address;
 		let value = $cpu.read8(address);
 
-		$cpu.tick();
+		$cpu.write8(address, value);
 
 		let result = value.wrapping_add(1);
 		$cpu.write8(address, result);
@@ -243,7 +243,7 @@ macro_rules! lsr {
 		let address = $address;
 		let value = $cpu.read8(address);
 		$cpu.p.carry = (value & 0x1) != 0;
-		$cpu.tick();
+		$cpu.write8(address, value);
 		$cpu.set_nz(value >> 1);
 		$cpu.write8(address, value >> 1);
 	};
@@ -319,7 +319,7 @@ macro_rules! rla {
 
 		let carry = $cpu.p.carry as u8;
 		$cpu.p.carry = (value & 0x80) != 0;
-		$cpu.tick();
+		$cpu.write8(address, value);
 
 		let result = (value << 1) | carry;
 		$cpu.write8(address, result);
@@ -337,7 +337,7 @@ macro_rules! rol {
 		let carry = $cpu.p.carry as u8;
 		$cpu.p.carry = (value & 0x80) != 0;
 		let result = (value << 1) | carry;
-		$cpu.tick();
+		$cpu.write8(address, value);
 		$cpu.set_nz(result);
 		$cpu.write8(address, result);
 	};
@@ -361,7 +361,7 @@ macro_rules! ror {
 		let carry = $cpu.p.carry as u8;
 		$cpu.p.carry = (value & 0x1) != 0;
 		let result = (value >> 1) | (carry << 7);
-		$cpu.tick();
+		$cpu.write8(address, value);
 		$cpu.set_nz(result);
 		$cpu.write8(address, result);
 	};
@@ -387,7 +387,7 @@ macro_rules! rra {
 		$cpu.p.carry = (value & 0x1) != 0;
 
 		let result = (value >> 1) | (carry << 7);
-		$cpu.tick();
+		$cpu.write8(address, value);
 		$cpu.write8(address, result);
 
 		let carry = $cpu.p.carry as u16;
@@ -403,7 +403,8 @@ macro_rules! rra {
 
 macro_rules! rti {
 	($cpu: expr) => {
-		$cpu.tick();
+		let imm = $cpu.imm();
+		$cpu.read8(imm);
 		$cpu.tick();
 		let status = $cpu.pop8();
 		$cpu.p.write(status);
@@ -413,7 +414,8 @@ macro_rules! rti {
 
 macro_rules! rts {
 	($cpu: expr) => {
-		$cpu.tick();
+		let imm = $cpu.imm();
+		$cpu.read8(imm);
 		$cpu.tick();
 		$cpu.pc = $cpu.pop16().wrapping_add(1);
 		$cpu.tick();
@@ -449,7 +451,7 @@ macro_rules! slo {
 		let value = $cpu.read8(address);
 
 		$cpu.p.carry = (value & 0x80) != 0;
-		$cpu.tick();
+		$cpu.write8(address, value);
 
 		let result = value << 1;
 		$cpu.write8(address, result);
@@ -466,7 +468,7 @@ macro_rules! sre {
 		let value = $cpu.read8(address);
 
 		$cpu.p.carry = (value & 0x1) != 0;
-		$cpu.tick();
+		$cpu.write8(address, value);
 
 		let result = value >> 1;
 		$cpu.write8(address, result);
@@ -530,14 +532,15 @@ macro_rules! trxs {
 
 impl Ricoh2A03 {
 	pub fn interrupt(&mut self, t: InterruptType) {
-		self.tick();
-
 		if t != InterruptType::BRK {
-			self.tick();
+			let addr = self.pc;
+			self.read8(addr);
+			self.read8(addr);
 		} else {
-			self.pc += 1;
+			let addr = self.imm();
+			self.read8(addr);
 		}
-		
+
 		if t != InterruptType::RESET {
 			let pc = self.pc;
 			self.push16(pc);
@@ -799,7 +802,7 @@ impl Ricoh2A03 {
 			0xfd => { mnemonic!(pc, "SBC abs,x"); sbc!(self, self.absx()); },
 			0xfe => { mnemonic!(pc, "INC abs,x"); inc!(self, self._absx()); },
 			0xff => { mnemonic!(pc, "ISC abs,x"); isc!(self, self.absx()); },
-            _ => panic!("unimplemented opcode 0x{:02x}", opcode)
+            _ => println!("unimplemented opcode 0x{:02x}", opcode)
         }
     }
 }

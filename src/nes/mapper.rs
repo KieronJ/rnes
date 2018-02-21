@@ -16,6 +16,8 @@ pub trait Mapper {
 pub fn create_mapper(rom: Rom) -> Box<Mapper + Send> {
     let mapper = rom.mapper();
 
+    println!("Mapper #{}", mapper);
+
     match mapper {
         0 => Box::new(Nrom::new(rom)) as Box<Mapper + Send>,
         1 => Box::new(Mmc1::new(rom)) as Box<Mapper + Send>,

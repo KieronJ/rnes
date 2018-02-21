@@ -15,8 +15,6 @@ pub struct Mmc1 {
 
 impl Mmc1 {
     pub fn new(rom: Rom) -> Mmc1 {
-        println!("Mapper #{}", rom.mapper());
-
         Mmc1 {
             rom: rom,
             prg_ram: vec![0; 0x2000].into_boxed_slice(),

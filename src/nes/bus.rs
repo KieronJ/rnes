@@ -110,12 +110,12 @@ impl Bus {
 
                 self.write(0x2004, data);
                 self.tick();
+            }
 
+            self.tick();
+
+            if self.ppu.odd() {
                 self.tick();
-
-                if self.ppu.odd() {
-                    self.tick();
-                }
             }
         }
 

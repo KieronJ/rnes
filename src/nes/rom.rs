@@ -92,4 +92,8 @@ impl Rom {
     pub fn prg_banks(&self) -> usize {
         self.prg.len() / ROM_PRG_BANK_SIZE
     }
+
+    pub fn chr_banks(&self) -> usize {
+        self.chr.len() / ROM_CHR_BANK_SIZE
+    }
 }

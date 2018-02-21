@@ -6,13 +6,23 @@ use nes::rom::ROM_PRG_BANK_SIZE;
 pub struct Nrom {
     rom: Rom,
     ram: Box<[u8]>,
+    chr_ram: Box<[u8]>,
 }
 
 impl Nrom {
     pub fn new(rom: Rom) -> Nrom {
+        let chr_ram;
+
+        if rom.chr_banks() == 0 {
+            chr_ram = vec![0; 0x2000].into_boxed_slice();
+        } else {
+            chr_ram = vec![0; 0].into_boxed_slice();
+        }
+
         Nrom {
             rom: rom,
-            ram: vec![0; 0x2000].into_boxed_slice()
+            ram: vec![0; 0x2000].into_boxed_slice(),
+            chr_ram: chr_ram
         }
     }
 }
@@ -27,7 +37,11 @@ impl Mapper for Nrom {
     }
 
     fn read_chr(&self, address: u16) -> u8 {
-        self.rom.read_chr(address as usize)
+        if self.rom.chr_banks() == 0 {
+            self.chr_ram[address as usize]
+        } else {
+            self.rom.read_chr(address as usize)
+        }
     }
 
     fn read_prg(&self, address: u16) -> u8 {
@@ -48,8 +62,12 @@ impl Mapper for Nrom {
         }
     }
 
-    fn write_chr(&mut self, address: u16, _: u8) {
-        println!("unsupported write to CHR 0x{:04x}", address)
+    fn write_chr(&mut self, address: u16, value: u8) {
+        if self.rom.chr_banks() == 0 {
+            self.chr_ram[address as usize] = value;
+        } else {
+            println!("unsupported write to CHR 0x{:04x}", address)
+        }
     }
 
     fn write_prg(&mut self, address: u16, value: u8) {
@@ -58,6 +76,6 @@ impl Mapper for Nrom {
             return;
         }
 
-        panic!("unsupported write to PRG")
+        println!("unsupported write to PRG 0x{:04x}", address)
     }
 }
