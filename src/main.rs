@@ -39,7 +39,7 @@ fn main() {
 	let mut sdl_event = sdl_context.event_pump().unwrap();
 	let sdl_video = sdl_context.video().unwrap();
 
-	let sdl_window = sdl_video.window("rnes", 256, 240).build().unwrap();
+	let sdl_window = sdl_video.window("rnes", 256, 224).build().unwrap();
 	let mut sdl_canvas = sdl_window.into_canvas().build().unwrap();
 	let sdl_texture_creator = sdl_canvas.texture_creator();
 	let mut sdl_texture = sdl_texture_creator.create_texture_streaming(
@@ -101,7 +101,7 @@ fn main() {
 
 			sdl_canvas.clear();
 			cpu.draw_screen(&mut sdl_texture);
-			sdl_canvas.copy(&sdl_texture, None, Some(Rect::new(0, 0, 256, 240))).unwrap();
+			sdl_canvas.copy(&sdl_texture, None, Some(Rect::new(0, -8, 256, 240))).unwrap();
 			sdl_canvas.present();
 
 			//nt_canvas.clear();

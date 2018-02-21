@@ -252,14 +252,8 @@ impl Ricoh2C02 {
 
     fn draw_pixel(&mut self) {
         let framebuffer_address = ((self.scanline as usize) << 8) + self.cycle - 1;
-
         let pixel_colour = self.priority_select();
-
-        if self.scanline < 8 || self.scanline > 231 {
-            self.framebuffer[framebuffer_address] = self.palette_read(0x3f00);
-        } else {
-            self.framebuffer[framebuffer_address] = self.palette_read(pixel_colour);
-        }
+        self.framebuffer[framebuffer_address] = self.palette_read(pixel_colour);
     }
 
     fn get_pixel_colour(&self) -> u8 {
