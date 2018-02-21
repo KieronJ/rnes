@@ -971,6 +971,11 @@ impl Ricoh2C02 {
                 },
 
                 5 => {
+                    if !self.sprite_inrange(self.secondary_oam[(self.sprite_fill_count * 4)], self.scanline) {
+                        self.sprite_shift_low[self.sprite_fill_count] = 0;
+                        return;
+                    }
+
                     let tile_index = self.secondary_oam[(self.sprite_fill_count * 4) + 1] as u16;
 
                     let mut pattern_address;
@@ -1007,6 +1012,11 @@ impl Ricoh2C02 {
                 },
 
                 7 => {
+                    if !self.sprite_inrange(self.secondary_oam[(self.sprite_fill_count * 4)], self.scanline) {
+                        self.sprite_shift_high[self.sprite_fill_count] = 0;
+                        return;
+                    }
+
                     let tile_index = self.secondary_oam[(self.sprite_fill_count * 4) + 1] as u16;
 
                     let mut pattern_address;
@@ -1040,7 +1050,6 @@ impl Ricoh2C02 {
                     }
 
                     self.sprite_shift_high[self.sprite_fill_count] = self.vram_read(pattern_address.wrapping_add(8));
-
                     self.sprite_fill_count += 1;
                 },
                 _ => ()
