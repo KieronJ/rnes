@@ -489,18 +489,22 @@ macro_rules! st {
 
 macro_rules! stabx {
 	($cpu: expr, $reg: expr) => {
-		$cpu.tick();
-		let address = $cpu.abs().wrapping_add($cpu.x as u16);
+		let abs = $cpu.abs();
+		let address = abs.wrapping_add($cpu.x as u16);
+		let address2 = (abs & 0xff00) + $cpu.x as u16;
 		let value = $reg;
+		$cpu.read8(address2);
 		$cpu.write8(address, value);
 	};
 }
 
 macro_rules! staby {
 	($cpu: expr, $reg: expr) => {
-		$cpu.tick();
-		let address = $cpu.abs().wrapping_add($cpu.y as u16);
+		let abs = $cpu.abs();
+		let address = abs.wrapping_add($cpu.y as u16);
+		let address2 = (abs & 0xff00) + $cpu.y as u16;
 		let value = $reg;
+		$cpu.read8(address2);
 		$cpu.write8(address, value);
 	};
 }

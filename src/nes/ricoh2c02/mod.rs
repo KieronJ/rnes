@@ -226,7 +226,7 @@ impl Ricoh2C02 {
                 sprite_colour = self.get_sprite_colour(sprite) as u16;
             }
 
-            if sprite == 0 && colour != 0 && sprite_colour != 0 && self.cycle < 255 {
+            if sprite == 0 && colour != 0 && sprite_colour != 0 && self.cycle != 256 {
                 self.sprite_0_hit = true;
             }
 
@@ -273,7 +273,7 @@ impl Ricoh2C02 {
             colour = 0;
         }
 
-        if (self.cycle < 8) && !self.lc_background_enable {
+        if (self.cycle <= 8) && !self.lc_background_enable {
             colour = 0;
         }
 
@@ -853,7 +853,9 @@ impl Ricoh2C02 {
 
         self.attribute_shift_high <<= 1;
         self.attribute_shift_high |= self.attribute_latch_high;
+    }
 
+    fn shift_sprites(&mut self) {
         for i in 0..8 {
             if self.sprite_counter[i] == 0 {
                 if self.sprite_latch[i] & 0x40 != 0 {
@@ -910,14 +912,19 @@ impl Ricoh2C02 {
                 }
 
             } else {
-                if self.sprite_inrange(self.oam_buffer, self.scanline) {
-                    self.sprite_overflow = true;
-                } else {
-                    self.oam_addr = self.oam_addr.wrapping_add(5);
+                if !self.oam_overflow {
+                    if self.sprite_inrange(self.oam_buffer, self.scanline) {
+                        self.sprite_overflow = true;
+                    } else {
+                        self.oam_addr = self.oam_addr.wrapping_add(4);
+                        self.oam_addr = self.oam_addr & !0x3 | self.oam_addr.wrapping_add(1) & 0x3;
 
-                    if self.oam_addr < 4 {
-                        self.oam_overflow = true;
-                    }
+                        println!("{}", self.oam_addr);
+
+                        if self.oam_addr < 4 {
+                            self.oam_overflow = true;
+                        }
+                    } 
                 }
             }
         }
@@ -946,7 +953,11 @@ impl Ricoh2C02 {
             }
 
             self.shift_registers();
-            self.sprite_evaluation();
+            self.shift_sprites();
+
+            if self.rendering_enabled() {
+                self.sprite_evaluation();
+            }
         }
 
         else if self.cycle >= 257 && self.cycle <= 320 {
@@ -965,7 +976,7 @@ impl Ricoh2C02 {
                 },
 
                 5 => {
-                    if !self.sprite_inrange(self.secondary_oam[(self.sprite_fill_count * 4)], self.scanline) {
+                    if !self.sprite_inrange(self.secondary_oam[(self.sprite_fill_count * 4)], self.scanline + 1) {
                         self.sprite_shift_low[self.sprite_fill_count] = 0;
                         return;
                     }
@@ -1006,7 +1017,7 @@ impl Ricoh2C02 {
                 },
 
                 7 => {
-                    if !self.sprite_inrange(self.secondary_oam[(self.sprite_fill_count * 4)], self.scanline) {
+                    if !self.sprite_inrange(self.secondary_oam[(self.sprite_fill_count * 4)], self.scanline + 1) {
                         self.sprite_shift_high[self.sprite_fill_count] = 0;
                         return;
                     }
@@ -1053,14 +1064,14 @@ impl Ricoh2C02 {
         else if self.cycle >= 321 && self.cycle <= 336 {
             self.load_tile_info();
 
-            if self.scanline != PPU_PRERENDER {
-                self.shift_registers();
-            }
-
             if self.cycle == 328 || self.cycle == 336 {
                 if self.rendering_enabled() {
                     self.increment_horizontal_scroll();
                 }
+            }
+
+            if self.scanline != PPU_PRERENDER {
+                self.shift_registers();
             }
         }
     }

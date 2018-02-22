@@ -1,7 +1,7 @@
 # rnes
 A simple NES emulator in Rust.
 
-Currently supported mappers: NROM (0), UNROM (2)
+Currently supported mappers: NROM (0), UNROM (2), CNROM (3)
 
 # Screenshots
 Donkey Kong
